@@ -8,5 +8,5 @@ cp /home/student/workspace/skeleton/setup.sh /workspace/evaluate
 
 cd /workspace/evaluate
 source /workspace/evaluate/setup.sh
-cp /workspace/scripts/evaluate.py /workspace/evaluate
+cp /home/student/workspace/scripts/evaluate.py /workspace/evaluate
 conda run -n $EVAL_ENV python evaluate.py
