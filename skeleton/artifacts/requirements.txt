@@ -2,3 +2,6 @@ torch
 torchvision
 transformers
 datasets
+bitsandbytes
+accelerate
+peft
