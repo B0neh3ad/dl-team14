@@ -13,3 +13,46 @@ Now, solve the following puzzle based on its input grid by applying the rules yo
 user_message_template3 = \
 '''----------------------------------------
 What is the output grid? Only provide the output grid in the form as in the example input and output pairs. Do not provide any additional information:'''
+
+# Below functions are used to visualize the grid data in a more human-readable format
+# imported from skeleton/utils.py
+
+from pathlib import Path
+
+import numpy as np
+
+from rich.console import Console
+from rich.text import Text
+from typing import List
+
+color_map = {
+    0: "black",
+    1: "red",
+    2: "green",
+    3: "yellow",
+    4: "blue",
+    5: "magenta",
+    6: "cyan",
+    7: "white",
+    8: "bright_red",
+    9: "bright_green",
+}
+
+console = Console()
+
+def make_rich_lines(grid: List[List[int]]) -> List[Text]:
+    lines = []
+    for row in grid:
+        visual = Text()
+        for cell in row:
+            color = color_map.get(cell, "white")
+            visual.append("  ", style=f"on {color}")
+        raw = Text("  " + str(row))
+        visual.append(raw)
+        lines.append(visual)
+    return lines
+
+def render_grid(grid: List[List[int]]):
+    lines = make_rich_lines(grid)
+    for line in lines:
+        console.print(line)

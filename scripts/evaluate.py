@@ -64,7 +64,7 @@ def load_data(base_dir):
 
 def main():
     token = os.environ.get("HF_TOKEN", None)
-    from arc import ARCSolver
+    from arc import ARCSolver, render_grid
 
     solver = ARCSolver(token=token)
     solver.prepare_evaluation()
@@ -79,12 +79,20 @@ def main():
 
     from datasets import Dataset
     eval_dataset = Dataset.from_pandas(df).shuffle(42).select(range(N_data))
-    for eval_data in tqdm(eval_dataset):
+    for idx, eval_data in enumerate(tqdm(eval_dataset)):
         preds = solver.predict(
             eval_data["train"],
             eval_data["test"][0]["input"],
         )
         s = check_match(preds, eval_data["test"][0]["output"])
+
+        print(f"Test input {idx}:")
+        render_grid(eval_data["test"][0]["input"])
+        print(f"Predicted output {idx}:")
+        render_grid(preds)
+        print(f"Ground truth output {idx}:")
+        render_grid(eval_data["test"][0]["output"])
+
         scores.append(s)
     
     score = np.array(scores).mean() * 100
