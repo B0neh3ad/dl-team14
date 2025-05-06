@@ -9,4 +9,7 @@ cp /home/student/workspace/skeleton/setup.sh /workspace/evaluate
 cd /workspace/evaluate
 source /workspace/evaluate/setup.sh
 cp /home/student/workspace/scripts/evaluate.py /workspace/evaluate
-conda run -n $EVAL_ENV python evaluate.py
+
+eval "$(conda shell.bash hook)"
+conda activate $EVAL_ENV
+python evaluate.py
