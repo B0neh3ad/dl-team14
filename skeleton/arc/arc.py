@@ -1,4 +1,4 @@
-from peft import LoraConfig, PeftModel
+from peft import LoraConfig, PeftModel, prepare_model_for_kbit_training
 from transformers import GenerationConfig
 import torch
 from typing import List
@@ -7,22 +7,17 @@ import numpy as np
 from .utils import system_prompt, user_message_template1, user_message_template2, user_message_template3
 from transformers import BitsAndBytesConfig, AutoModelForCausalLM, AutoTokenizer, TrainingArguments, pipeline
 from trl import SFTConfig, SFTTrainer, DataCollatorForCompletionOnlyLM
+from peft import PeftModelForCausalLM
 
 class cfg:
     adapter_path = "artifacts/checkpoint-final"
     output_dir = "artifacts/checkpoint-final"
-    max_seq_len = 4096
-    epochs = 1
-    max_steps = 1000
+    max_seq_len = 1024
+    epochs = 5
+    # max_steps = 1000
     eval_steps = 100
     warmup_ratio = 0.1
     learning_rate = 2e-4
-    batch_size = 16
-
-    # LoRA settings
-    use_rslora = True
-    use_dora = True
-    lora_r = 32
 
 class ARCSolver:
     """
@@ -49,13 +44,14 @@ class ARCSolver:
             trust_remote_code=True, # Allow the model to use custom code from the repository
             quantization_config=bnb_config, # Apply the 4-bit quantization configuration
             attn_implementation='sdpa', # Use scaled-dot product attention for better performance
-            torch_dtype=torch.float16, # Set the data type for the model
             use_cache=False, # Disable caching to save memory
             device_map='auto', # Automatically map the model to available devices (e.g., GPUs)
-            token=token
+            token=token,
         )
 
         self.tokenizer = AutoTokenizer.from_pretrained(model_id, token=token)
+        if self.tokenizer.pad_token is None:
+            self.tokenizer.pad_token = self.tokenizer.eos_token
 
         self.pixel_ids = [
             self.tokenizer.encode(str(i), add_special_tokens=False)[0] for i in range(10)
@@ -108,7 +104,7 @@ class ARCSolver:
         """
         Args:
             datapoint (dict): contains training data, test input
-            is_train (bool): whether the function is called for training or not
+            is_train (bool): whether the data is training/validation data or not
         
         Returns:
             prompt (dict): dictionary that contains input ids and additional informations
@@ -140,67 +136,57 @@ class ARCSolver:
 
 
         messages = sys + user
-        
+        assis = self.tokenizer.encode("<|eot_id|><|start_header_id|>assistant<|end_header_id|>", add_special_tokens=False)
+
         if is_train:
-            assis = self.tokenizer.encode("<|eot_id|><|start_header_id|>assistant<|end_header_id|>" + "\n", add_special_tokens=False)
+            # attach labels to data
             output_test_data = datapoint['test'][0]['output']
-            assis += self.format_grid(output_test_data)
-        else:
-            assis = self.tokenizer.encode("<|eot_id|><|start_header_id|>assistant<|end_header_id|>", add_special_tokens=False)
+            labels = self.format_grid(output_test_data)
+            assis += labels
         messages += assis
+        
+        attention_mask = [1] * len(messages)
 
         if is_train:
             return {
                 "input_ids": messages,
-                "input": input_test_data,
-                "output": output_test_data,
-                "train": training_data
+                "attention_mask": attention_mask,
             }
         else:
             return {
                 "input_ids": messages,
+                "attention_mask": attention_mask,
+
+                # Required for post-processing the shape of LLM-generated grid
+                # Hence these fields are not used in training
                 "input": input_test_data,
-                "train": training_data
+                "train": training_data,
             }
 
     def train(self, train_dataset, val_dataset=None):
         """
         Train a model with train_dataset.
         """
-        def _format_data(datapoint, is_train=False):
-            prompt = self.format_prompt(datapoint, is_train)
-            input_text = self.tokenizer.decode(prompt['input_ids'])
-            return {'text': input_text}
+        self.model.gradient_checkpointing_enable()
+        self.model.enable_input_require_grads()
 
         # 1. Format dataset
-        print('Format dataset')
+        print('*** Format dataset ***')
         # TODO: implement batched processing
         train_dataset = train_dataset.map(
-            lambda x: _format_data(x, is_train=True),
+            lambda x: self.format_prompt(x, is_train=True),
             remove_columns=train_dataset.column_names,
         )
 
         val_dataset = val_dataset.map(
-            lambda x: _format_data(x, is_train=False),
+            lambda x: self.format_prompt(x, is_train=True),
             remove_columns=val_dataset.column_names,
         )
 
         # 2. Load LoRA Adapter
-        print(f'Loading adapter from {cfg.adapter_path}')
-        peft_config = LoraConfig(
-            # lora_alpha: LoRA scaling factor.
-            lora_alpha=64, #64,
-            lora_dropout=0.1, # 0.1, althought Vaca suggested to use 0.05 for big models
-            # r: the rank of the update matrices, expressed in int. Lower rank results in smaller update matrices with fewer trainable parameters.
-            r=cfg.lora_r, #16
-            bias="none",
-            task_type="CAUSAL_LM",
-            # target_modules: The modules (for example, attention blocks) to apply the LoRA update matrices.
-            target_modules= ['k_proj', 'q_proj', 'v_proj', 'o_proj'],
-            use_rslora=cfg.use_rslora,
-            use_dora=cfg.use_dora,
-        )
-        self.model = PeftModel.from_pretrained(
+        print(f'\n*** Loading adapter from {cfg.adapter_path} ***')
+        self.model = prepare_model_for_kbit_training(self.model)
+        self.model = PeftModelForCausalLM.from_pretrained(
             self.model,
             cfg.adapter_path,
             device_map="auto",
@@ -208,17 +194,17 @@ class ARCSolver:
         )
 
         # 3. Set training arguments
-        print('Set training arguments')
+        print('\n*** Set training arguments ***')
         batch_size_kwargs = dict(
-            per_device_train_batch_size=3,  # 4-16 should be fine for lora.
-            gradient_accumulation_steps=5,
+            per_device_train_batch_size=4,  # 4-16 should be fine for lora.
+            gradient_accumulation_steps=4,
             per_device_eval_batch_size=4,
         )
 
         training_arguments = SFTConfig(
             output_dir=cfg.output_dir,          # output directory
             num_train_epochs=cfg.epochs,        # total number of training epochs
-            max_steps=cfg.max_steps,            # total number of training steps to perform
+            # max_steps=cfg.max_steps,            # total number of training steps to perform
             warmup_ratio=cfg.warmup_ratio,      # number of warmup steps for learning rate scheduler
             learning_rate=cfg.learning_rate,    # learning rate
             lr_scheduler_type="linear",         # learning rate scheduler type
@@ -233,33 +219,31 @@ class ARCSolver:
 
             dataset_text_field="text",          # the name of the text field in the dataset
             max_seq_length=cfg.max_seq_len,     # maximum sequence length
+            label_names=["labels"],
 
             **batch_size_kwargs
         )
         
         # 4. Set data collator
-        print('Set data collator')
+        print('\n*** Set data collator ***')
         data_collator = DataCollatorForCompletionOnlyLM(
             tokenizer=self.tokenizer,
-            instruction_template='<|start_header_id|>user<|end_header_id|>',
+            # instruction_template='<|start_header_id|>user<|end_header_id|>',
             response_template='<|start_header_id|>assistant<|end_header_id|>',
         )
 
         # 5. Train the model with SFTTrainer
-        print('Train the model with SFTTrainer')
+        print('\n*** Train the model with SFTTrainer ***')
         trainer = SFTTrainer(
             model=self.model,
             train_dataset=train_dataset,
             eval_dataset=val_dataset,
-            peft_config=peft_config,
             data_collator=data_collator,
             args=training_arguments,
             # packing=True, # ValueError: You passed a `DataCollatorForCompletionOnlyLM` to the SFTTrainer. This is not compatible with the `packing` argument.
         )
 
-        print('Training started')
         trainer.train()
-        print('Training finished')
 
     def predict(self, examples, questions_input):
         """
