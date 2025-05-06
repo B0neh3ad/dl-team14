@@ -49,18 +49,12 @@ pip install --upgrade pip==24.3.1
 
 ## 2. Install required packages
 
-### 1. Install some packages manually
-`requirements.txt` 내에는 주석 처리된 패키지가 몇 개 있습니다. 이들은 `pip install -r requirements.txt`로는 명시된 버전을 자동 설치할 수 없는 패키지들입니다.
+### 1. Install torch manually
+`requirements.txt`에서 pytorh 관련 패키지들은 주석 처리되어 있습니다. 이들은 `pip install -r requirements.txt`로는 명시된 버전을 자동 설치할 수 없습니다. Cuda 버전이 특정되어 있기 때문입니다.
 
-따라서 가상환경 하에서 아래의 명령어를 입력하여 일일히 설치해줍니다.
+따라서 가상환경 하에서 아래의 명령어를 입력하여 설치합니다.
 
 ```shell
-# libmambapy
-conda install conda-forge::libmambapy=2.0.5
-
-# menuinst
-conda install conda-forge::menuinst=2.2.0
-
 # torch, torchvision, and torchaudio
 pip install torch==2.6.0 torchvision==0.21.0 torchaudio==2.6.0 --index-url https://download.pytorch.org/whl/cu124
 ```
