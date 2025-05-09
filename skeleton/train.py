@@ -144,44 +144,48 @@ def parse_args():
     print("Parsing arguments...")
 
     parser = argparse.ArgumentParser(description="Train the model.")
-    parser.add_argument("--model_id", type=str, default=args_default.model_id, help="Model ID")
-    parser.add_argument("--output_dir", type=str, default=args_default.output_dir, help="Output directory")
-    parser.add_argument("--adapter_path", type=str, default=args_default.adapter_path, help="Adapter path")
-    parser.add_argument("--config_path", type=str, default=args_default.config_path, help="Config path")
+    parser.add_argument("--model-id", type=str, default=args_default.model_id, help="Model ID")
+    parser.add_argument("--output-dir", type=str, default=args_default.output_dir, help="Output directory")
+    parser.add_argument("--adapter-path", type=str, default=args_default.adapter_path, help="Adapter path")
+    parser.add_argument("--config-path", type=str, default=args_default.config_path, help="Config path")
     
-    parser.add_argument("--max_seq_len", type=int, default=args_default.max_seq_len, help="Max sequence length")
+    parser.add_argument("--max-seq-len", type=int, default=args_default.max_seq_len, help="Max sequence length")
     
     # Model Configuration
     parser.add_argument("--attn-impl", type=str, default="sdpa", help="Attention implementation")
     parser.add_argument("--use-cache", action="store_true", help="Use cache")
 
     # Dataset Configuration
-    parser.add_argument("--dataset_len", type=int, default=args_default.dataset_len, help="Dataset length")
-    parser.add_argument("--val_size", type=float, default=args_default.val_size, help="Validation size")
+    parser.add_argument("--dataset-len", type=int, default=args_default.dataset_len, help="Dataset length")
+    parser.add_argument("--val-size", type=float, default=args_default.val_size, help="Validation size")
 
     # Training Configuration
     parser.add_argument("--epochs", type=int, default=args_default.epochs, help="Number of epochs")
-    parser.add_argument("--warmup_ratio", type=float, default=args_default.warmup_ratio, help="Warmup ratio")
-    parser.add_argument("--learning_rate", type=float, default=args_default.learning_rate, help="Learning rate")
-    parser.add_argument("--lr_scheduler", type=str, default=args_default.lr_scheduler, help="Learning rate scheduler")
+    parser.add_argument("--warmup-ratio", type=float, default=args_default.warmup_ratio, help="Warmup ratio")
+    parser.add_argument("--learning-rate", type=float, default=args_default.learning_rate, help="Learning rate")
+    parser.add_argument("--lr-scheduler", type=str, default=args_default.lr_scheduler, help="Learning rate scheduler")
     parser.add_argument("--optim", type=str, default=args_default.optim, help="Optimizer")
-    parser.add_argument("--weight_decay", type=float, default=args_default.weight_decay, help="Weight decay")
+    parser.add_argument("--weight-decay", type=float, default=args_default.weight_decay, help="Weight decay")
 
-    parser.add_argument("--do_eval", action="store_true", help="Evaluate the model")
-    parser.add_argument("--eval_strategy", type=str, default=args_default.eval_strategy, help="Evaluation strategy")
-    parser.add_argument("--eval_steps", type=int, default=args_default.eval_steps, help="Evaluation steps")
-    parser.add_argument("--save_steps", type=int, default=args_default.save_steps, help="Save steps")
-    parser.add_argument("--logging_steps", type=int, default=args_default.logging_steps, help="Logging steps")
+    parser.add_argument("--do-eval", action="store_true", help="Evaluate the model")
+    parser.add_argument("--eval-strategy", type=str, default=args_default.eval_strategy, help="Evaluation strategy")
+    parser.add_argument("--eval-steps", type=int, default=args_default.eval_steps, help="Evaluation steps")
+    parser.add_argument("--save-steps", type=int, default=args_default.save_steps, help="Save steps")
+    parser.add_argument("--logging-steps", type=int, default=args_default.logging_steps, help="Logging steps")
     parser.add_argument("--log-level", type=str, default=args_default.log_level, help="Log level")
 
-    parser.add_argument("--train_batch_size", type=int, default=args_default.train_batch_size, help="Batch size per device for training")
-    parser.add_argument("--grad_acc_steps", type=int, default=args_default.grad_acc_steps, help="Number of gradient accumulation steps")
-    parser.add_argument("--eval_batch_size", type=int, default=args_default.eval_batch_size, help="Batch size per device for evaluation")
+    parser.add_argument("--train-batch-size", type=int, default=args_default.train_batch_size, help="Batch size per device for training")
+    parser.add_argument("--grad-acc-steps", type=int, default=args_default.grad_acc_steps, help="Number of gradient accumulation steps")
+    parser.add_argument("--eval-batch-size", type=int, default=args_default.eval_batch_size, help="Batch size per device for evaluation")
 
     # LoRA Configuration
+    parser.add_argument("--load-adapter", action="store_true", default=False, help="Load adapter from path")
     parser.add_argument("--lora-r", type=int, default=adapter_config_default.r, help="Rank for LoRA")
-    parser.add_argument("--lora_alpha", type=int, default=adapter_config_default.lora_alpha, help="LoRA alpha")
-    parser.add_argument("--lora_dropout", type=float, default=adapter_config_default.lora_dropout, help="LoRA dropout")
+    parser.add_argument("--lora-alpha", type=int, default=adapter_config_default.lora_alpha, help="LoRA alpha")
+    parser.add_argument("--lora-dropout", type=float, default=adapter_config_default.lora_dropout, help="LoRA dropout")
+    parser.add_argument("--lora-bias", type=str, default=adapter_config_default.bias, help="LoRA bias")
+    parser.add_argument("--lora-target-modules", nargs='+', type=str, default=adapter_config_default.target_modules, help="LoRA target modules")
+    parser.add_argument("--lora-task-type", type=str, default=adapter_config_default.task_type, help="LoRA task type")
     parser.add_argument("--use-rslora", action="store_true", help="Use RSLORA")
     parser.add_argument("--use-dora", action="store_true", help="Use DORA")
 
