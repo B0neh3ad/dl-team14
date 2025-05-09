@@ -176,14 +176,26 @@ class ARCSolver:
         self.model.enable_input_require_grads()
 
         # Load LoRA Adapter
-        print(f'\n*** Loading adapter from {args.adapter_path} ***')
-        self.model = prepare_model_for_kbit_training(self.model)
-        self.model = PeftModelForCausalLM.from_pretrained(
-            self.model,
-            args.adapter_path,
-            device_map="auto",
-            is_trainable=True,
-        )
+        peft_config = None
+        if args.load_adapter:
+            print(f'\n*** Loading adapter from {args.adapter_path} ***')
+            self.model = prepare_model_for_kbit_training(self.model)
+            self.model = PeftModelForCausalLM.from_pretrained(
+                self.model,
+                args.adapter_path,
+                device_map="auto",
+                is_trainable=True,
+            )
+        else:
+            peft_config = LoraConfig(
+                r=args.lora_r,
+                lora_alpha=args.lora_alpha,
+                target_modules=args.lora_target_modules,
+                lora_dropout=args.lora_dropout,
+                bias=args.lora_bias,
+                task_type=args.lora_task_type,
+            )
+            self.model = prepare_model_for_kbit_training(self.model)
 
         # Format dataset
         print('*** Format dataset ***')
@@ -244,6 +256,7 @@ class ARCSolver:
             model=self.model,
             train_dataset=train_dataset,
             eval_dataset=val_dataset,
+            peft_config=peft_config,
             data_collator=data_collator,
             args=training_arguments,
         )
