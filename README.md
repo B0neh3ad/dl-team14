@@ -16,7 +16,7 @@ source venv/bin/activate
 이때 python, pip, conda의 버전은 아래에 명시된 practice server에서의 버전과 같아야 합니다.
 |항목|버전|
 |--|--|
-|`python`|3.11.1|
+|`python`|3.11.11|
 |`conda`|25.1.0|
 |`pip`|24.3.1|
 
