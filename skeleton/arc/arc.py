@@ -336,7 +336,7 @@ class ARCSolver:
         # Setup model and tokenizer with config
         self.setup(args)
 
-        self.model.load_adapter("artifacts/checkpoint-debug/checkpoint-1") # TODO: import path from args
+        self.model.load_adapter(args.output_dir)
         self.model.eval()
 
 
