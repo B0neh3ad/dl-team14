@@ -1,15 +1,15 @@
-import argparse
 from peft import LoraConfig, PeftModel, prepare_model_for_kbit_training
 from transformers import GenerationConfig
 import torch
 from typing import List
 import numpy as np
-import yaml
 
 from .utils import system_prompt, user_message_template1, user_message_template2, user_message_template3
 from transformers import BitsAndBytesConfig, AutoModelForCausalLM, AutoTokenizer, TrainingArguments, pipeline
+from unsloth import FastLanguageModel
 from trl import SFTConfig, SFTTrainer, DataCollatorForCompletionOnlyLM
-from peft import PeftModelForCausalLM
+from unsloth import UnslothTrainer as Trainer, unsloth_train, is_bfloat16_supported
+from unsloth import UnslothTrainingArguments as TrainingArguments
 
 class ARCSolver:
     """
@@ -21,7 +21,19 @@ class ARCSolver:
         Args:
             token (str): a huggingface token for restricted models such as llama3
         """
-        self.token = token
+        config_path = "artifacts/config/config.yml"
+        model_id = "meta-llama/Llama-3.2-3B-Instruct"
+
+        # Configure the BitsAndBytes settings for 4-bit quantization to reduce memory usag
+        self.model, self.tokenizer = FastLanguageModel.from_pretrained(model_id, max_seq_length=cfg.max_seq_len, load_in_4bit=True)
+
+        if self.tokenizer.pad_token is None:
+            self.tokenizer.pad_token = self.tokenizer.eos_token
+
+        self.pixel_ids = [
+            self.tokenizer.encode(str(i), add_special_tokens=False)[0] for i in range(10)
+        ]
+        self.sep = self.tokenizer.encode("\n", add_special_tokens=False)[0]
         self.device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
     def parse_grid(self, ids: List[int]):
@@ -128,61 +140,26 @@ class ARCSolver:
                 "train": training_data,
             }
 
-    def setup(self, args):
-        print("*** Setup model and tokenizer with config ***")
-        
-        # Configure the BitsAndBytes settings for 4-bit quantization to reduce memory usage
-        bnb_config = BitsAndBytesConfig(
-            load_in_4bit=True,  # Enable 4-bit quantization
-            bnb_4bit_use_double_quant=True,  # Use double quantization for improved precision
-            bnb_4bit_quant_type="nf4",  # Specify the quantization type
-            bnb_4bit_compute_dtype=torch.float16,  # Set the computation data type
-        )
-        self.model = AutoModelForCausalLM.from_pretrained(
-            args.model_id,
-            trust_remote_code=True, # Allow the model to use custom code from the repository
-            quantization_config=bnb_config, # Apply the 4-bit quantization configuration
-            attn_implementation=args.attn_impl, # Use scaled-dot product attention for better performance
-            use_cache=args.use_cache, # Disable caching to save memory
-            device_map='auto', # Automatically map the model to available devices (e.g., GPUs)
-            token=self.token,
-        )
-
-        self.tokenizer = AutoTokenizer.from_pretrained(args.model_id, token=self.token)
-        if self.tokenizer.pad_token is None:
-            self.tokenizer.pad_token = self.tokenizer.eos_token
-
-        self.pixel_ids = [
-            self.tokenizer.encode(str(i), add_special_tokens=False)[0] for i in range(10)
-        ]
-        self.sep = self.tokenizer.encode("\n", add_special_tokens=False)[0]
-
-
-    def train(self, train_dataset, val_dataset=None, args=None):
+    def train(self, train_dataset, val_dataset=None, cfg=None):
         """
         Train a model with train_dataset.
-        Args:
-            train_dataset (Dataset): training dataset
-            val_dataset (Dataset): validation dataset
-            args (Class): configuration for training
-        
-        Below code is imported from
-        https://github.com/ironbar/arc24/blob/main/notebooks/003_llm_fine-tuning_on_arc_tasks.ipynb
         """
+        FastLanguageModel.for_training(self.model)
 
-        # Setup model and tokenizer with config
-        self.setup(args)
-        self.model.gradient_checkpointing_enable()
-        self.model.enable_input_require_grads()
-
-        # Load LoRA Adapter
-        print(f'\n*** Loading adapter from {args.adapter_path} ***')
-        self.model = prepare_model_for_kbit_training(self.model)
-        self.model = PeftModelForCausalLM.from_pretrained(
+        # Load model with LoRA adapter
+        self.model = FastLanguageModel.get_peft_model(
             self.model,
-            args.adapter_path,
-            device_map="auto",
-            is_trainable=True,
+            target_modules=[
+                'q_proj','k_proj','v_proj','o_proj',
+                'gate_proj','up_proj','down_proj',
+            ],
+            r=32,
+            lora_alpha=64,
+            lora_dropout=0.0,
+            bias="none",
+            use_gradient_checkpointing=True,
+            random_state=42,
+            use_rslora=True,
         )
 
         # Format dataset
@@ -208,46 +185,47 @@ class ARCSolver:
 
         # Set training arguments
         print('\n*** Set training arguments ***')
-        batch_size_kwargs = dict(
-            per_device_train_batch_size=args.train_batch_size,  # 4-16 should be fine for lora.
-            gradient_accumulation_steps=args.grad_acc_steps,
-            per_device_eval_batch_size=args.eval_batch_size,
-        )
+        training_arguments = TrainingArguments(
+            output_dir=cfg.output_dir,
+            num_train_epochs=cfg.epochs,
+            warmup_ratio=0.25, # cfg.warmup_ratio
+            learning_rate=1e-4, # cfg.learning_rate
+            lr_scheduler_type='cosine',
+            optim="adamw_8bit",
 
-        training_arguments = SFTConfig(
-            output_dir=args.output_dir,
-            num_train_epochs=args.epochs,
-            # max_steps=args.max_steps,
-            warmup_ratio=args.warmup_ratio,
-            learning_rate=args.learning_rate,
-            lr_scheduler_type=args.lr_scheduler,
-            optim=args.optim,
-            weight_decay=args.weight_decay, 
+            do_eval=True,
+            eval_strategy='steps',
+            save_steps=cfg.eval_steps,
+            logging_steps=10,
+            eval_steps=cfg.eval_steps,
+            log_level="debug",
 
-            do_eval=args.do_eval,
-            eval_strategy=args.eval_strategy,
-            eval_steps=args.eval_steps,
-            save_steps=args.eval_steps,
-            logging_steps=args.logging_steps,
-            log_level=args.log_level,
-
-            max_seq_length=args.max_seq_len,
+            dataset_text_field="text",
+            max_seq_length=cfg.max_seq_len,
             label_names=["labels"],
-            report_to="wandb" if args.wandb else "none",
 
-            **batch_size_kwargs
+            per_device_train_batch_size=4,
+            gradient_accumulation_steps=2,
+            per_device_eval_batch_size=4,
+
+            embedding_learning_rate=1e-5,
+            fp16=not is_bfloat16_supported(),
+            bf16=is_bfloat16_supported(),
+            weight_decay=0.00,
+            seed=42,
         )
 
-        # Train the model with SFTTrainer
-        print('\n*** Train the model with SFTTrainer ***')
-        trainer = SFTTrainer(
+        # Train the model with Trainer
+        trainer = Trainer(
             model=self.model,
+            tokenizer=self.tokenizer,
             train_dataset=train_dataset,
             eval_dataset=val_dataset,
             data_collator=data_collator,
             args=training_arguments,
+            packing=False,
         )
-
+        
         trainer.train()
 
     def predict(self, examples, questions_input):
@@ -325,23 +303,15 @@ class ARCSolver:
         """
         Load pretrained weight, make model eval mode, etc.
         """
-        # Load config yaml file
-        # NOTE: You should locate config file in this path!
-        config_path = "artifacts/config/config.yaml"
-        with open(config_path, "r") as f:
-            config_dict = yaml.safe_load(f)
-        
-        args = argparse.Namespace(**config_dict)
-
-        # Setup model and tokenizer with config
-        self.setup(args)
-
-        self.model.load_adapter("artifacts/checkpoint-debug/checkpoint-1") # TODO: import path from args
+        self.model.load_adapter(cfg.output_dir)
         self.model.eval()
 
 
 if __name__ == "__main__":
-    solver = ARCSolver()
+    for name, module in self.model.named_modules():
+        print(name)
+
+   
 
 
 

@@ -64,7 +64,7 @@ def load_data(base_dir):
 
 def main():
     token = os.environ.get("HF_TOKEN", None)
-    from arc import ARCSolver, render_grid
+    from arc import render_grid, ARCSolver
 
     solver = ARCSolver(token=token)
     solver.prepare_evaluation()

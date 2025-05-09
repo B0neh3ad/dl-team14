@@ -4,4 +4,4 @@ source /home/student/workspace/skeleton/setup.sh
 
 eval "$(conda shell.bash hook)"
 conda activate $EVAL_ENV
-python train.py
+python train.py --debug

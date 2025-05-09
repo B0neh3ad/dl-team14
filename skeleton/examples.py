@@ -69,11 +69,11 @@ print(dataset[0]['test'])
 
 
 print("Train Input")
-render_grid(dataset[0]['train'][0]['input'])
+render_grid(dataset[1]['train'][0]['input'])
 print("Train Output")
-render_grid(dataset[0]['train'][0]['output'])
+render_grid(dataset[1]['train'][0]['output'])
 
 print("Test Input")
-render_grid(dataset[0]['test'][0]['input'])
+render_grid(dataset[1]['test'][0]['input'])
 print("Test Output")
-render_grid(dataset[0]['test'][0]['output'])
+render_grid(dataset[1]['test'][0]['output'])
