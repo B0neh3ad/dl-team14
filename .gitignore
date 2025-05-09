@@ -176,9 +176,20 @@ poetry.toml
 pyrightconfig.json
 
 # Checkpoints
-skeleton/artifacts/checkpoint-final/*
+checkpoint-final/*
+checkpoint-*
 
 # local files
 *.local
+
+# dataset image files
+dataset/output_images
+
+# configuration files
+config
+
+# Cached files from wandb, unsloth
+unsloth_compiled_cache
+wandb/
 
 # End of https://www.toptal.com/developers/gitignore/api/python,dotenv
