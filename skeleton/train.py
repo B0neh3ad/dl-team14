@@ -87,55 +87,62 @@ class adapter_config_default:
     use_dora = False
     use_rslora = False
     
-def load_data(base_dir, args=None):
-    '''
-    Load data from the specified directory and return a DataFrame.
-    '''
+def load_data(base_dir: str, grids_per_task: int = 6, seed: int = 42,
+              max_rows: int | None = None):
+    """
+    • base_dir 안의 *.json 각각을 task로 간주  
+    • task당 grids_per_task(기본 6)개 grid 무작위 추출  
+    • 결과 행은 task round-robin 순서로 interleave
 
-    filenames = os.listdir(base_dir) # 파일명에 확장자 포함
-    data_files = [os.path.join(base_dir, p) for p in filenames if ".json" in p]
+    반환: DataFrame(columns = task / train / test_input / test_output / test)
+    """
+    # ───────── json 로드 ─────────
+    file_list = sorted(f for f in os.listdir(base_dir) if f.endswith(".json"))
+    datasets  = []
+    for fname in file_list:
+        with open(os.path.join(base_dir, fname)) as fp:
+            datasets.append(json.load(fp))
+    task_names = [os.path.splitext(f)[0] for f in file_list]
 
-    dataset = []
-    for fn in data_files:
-        with open(fn) as fp:
-            data = json.load(fp)
-        dataset.append(data)
+    rng          = np.random.default_rng(seed)
+    task_buffers = []                 # task마다 뽑은 rows 임시 저장
 
-    filenames = [fn.split(".")[0] for fn in filenames] # 확장자 제거
-    data = []
-    MAX_LEN = args.dataset_len if args else 2000
-    rng = np.random.default_rng(42)
+    for ds, name in zip(datasets, task_names):
+        n = len(ds)
+        idxs = rng.choice(n, size=grids_per_task,
+                          replace=n < grids_per_task)
+        rows = []
+        for i in idxs:
+            grid         = ds[int(i)]
+            train_pool   = [j for j in range(n) if j != i] or [i]
+            train_idxs   = rng.choice(train_pool, size=3,
+                                      replace=len(train_pool) < 3)
+            train_grids  = [ds[int(j)] for j in train_idxs]
 
-    N = len(dataset)
+            test_input   = {'input': grid['input']}
+            test_output  = grid['output']
+            rows.append({
+                'task'       : name,
+                'train'      : train_grids,
+                'test_input' : [test_input],
+                'test_output': [test_output],
+                'test'       : [{'input': test_input['input'],
+                                 'output': test_output}],
+            })
+        task_buffers.append(rows)
 
-    while len(data) < MAX_LEN:
-        
-        task_idx = rng.integers(0, N) # 랜덤으로 task 선택
-        task = dataset[task_idx]
-        file_name = filenames[task_idx]
+    # ───────── round-robin interleave ─────────
+    interleaved = []
+    for round_idx in range(grids_per_task):
+        for rows in task_buffers:
+            if round_idx < len(rows):
+                interleaved.append(rows[round_idx])
+                if max_rows and len(interleaved) >= max_rows:
+                    break
+        if max_rows and len(interleaved) >= max_rows:
+            break
 
-        n_task = len(task)
-        grids_idx =  rng.choice(n_task, size=4, replace=True) # 앞서 추출한 task에서 랜덤으로 4개의 grid 선택
-        train_grids = [task[i] for i in grids_idx[:3]] # 3개는 train data로 사용
-        test_grids = [task[i] for i in grids_idx[3:]] # 1개는 test data로 사용
-
-        test_inputs = [{'input': grid['input']} for grid in test_grids]
-        test_outputs = [grid['output'] for grid in test_grids]
-        test_outputs_transformed = [{'output': grid} for grid in test_outputs]
-        combined_tests = []
-        for test_input, test_output in zip(test_inputs, test_outputs_transformed):
-            combined_tests.append({'input': test_input['input'], 'output': test_output['output']})
-
-        data.append({
-            'task': file_name,
-            'train': train_grids,
-            'test_input': test_inputs,
-            'test_output': test_outputs,
-            'test': combined_tests,
-        })
-
-    df = pd.DataFrame(data)
-    return df
+    return pd.DataFrame(interleaved)
 
 def parse_args():
     '''

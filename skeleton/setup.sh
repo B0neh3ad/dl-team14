@@ -14,3 +14,4 @@ export HF_TOKEN=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
 export EVAL_ENV=testenv
 conda create -n $EVAL_ENV python=3.10 -y
 conda run -n $EVAL_ENV pip install -r /workspace/evaluate/artifacts/requirements.txt
+pip install wandb
