@@ -87,62 +87,65 @@ class adapter_config_default:
     use_dora = False
     use_rslora = False
     
-def load_data(base_dir: str, grids_per_task: int = 6, seed: int = 42,
-              max_rows: int | None = None):
+def load_data(base_dir, args=None):
     """
-    • base_dir 안의 *.json 각각을 task로 간주  
-    • task당 grids_per_task(기본 6)개 grid 무작위 추출  
-    • 결과 행은 task round-robin 순서로 interleave
-
-    반환: DataFrame(columns = task / train / test_input / test_output / test)
+    ───────────────────────────────────────────────────────────────
+    같은 함수 호출형태(load_data(base_dir, args=None)) 유지.
+      • base_dir 안 *.json 각각을 하나의 task 로 간주
+      • **task 당 정확히 6 row** 만들어서 총 1 800 row(300 task × 6)
+      • row 순서는   task0-row0, task1-row0, …, task299-row0,
+                     task0-row1, task1-row1, …   처럼 round-robin.
+      • row 구조는 기존과 동일(train 3개 + test 1개)
+    ───────────────────────────────────────────────────────────────
     """
-    # ───────── json 로드 ─────────
-    file_list = sorted(f for f in os.listdir(base_dir) if f.endswith(".json"))
-    datasets  = []
-    for fname in file_list:
-        with open(os.path.join(base_dir, fname)) as fp:
-            datasets.append(json.load(fp))
-    task_names = [os.path.splitext(f)[0] for f in file_list]
+    # ── 파일 읽기 ────────────────────────────────────────────────
+    filenames = sorted(f for f in os.listdir(base_dir) if f.endswith(".json"))
+    data_files = [os.path.join(base_dir, f) for f in filenames]
 
-    rng          = np.random.default_rng(seed)
-    task_buffers = []                 # task마다 뽑은 rows 임시 저장
+    dataset = []
+    for path in data_files:
+        with open(path) as fp:
+            dataset.append(json.load(fp))
 
-    for ds, name in zip(datasets, task_names):
-        n = len(ds)
-        idxs = rng.choice(n, size=grids_per_task,
-                          replace=n < grids_per_task)
-        rows = []
-        for i in idxs:
-            grid         = ds[int(i)]
-            train_pool   = [j for j in range(n) if j != i] or [i]
-            train_idxs   = rng.choice(train_pool, size=3,
-                                      replace=len(train_pool) < 3)
-            train_grids  = [ds[int(j)] for j in train_idxs]
+    filenames = [os.path.splitext(f)[0] for f in filenames]  # 확장자 제거
+    N_TASK     = len(dataset)
+    ROWS_PER   = 6                                           # task당 6개
+    MAX_LEN    = args.dataset_len if args else N_TASK * ROWS_PER
 
-            test_input   = {'input': grid['input']}
-            test_output  = grid['output']
-            rows.append({
-                'task'       : name,
-                'train'      : train_grids,
-                'test_input' : [test_input],
-                'test_output': [test_output],
-                'test'       : [{'input': test_input['input'],
-                                 'output': test_output}],
-            })
-        task_buffers.append(rows)
+    rng = np.random.default_rng(42)
+    rows = []
 
-    # ───────── round-robin interleave ─────────
-    interleaved = []
-    for round_idx in range(grids_per_task):
-        for rows in task_buffers:
-            if round_idx < len(rows):
-                interleaved.append(rows[round_idx])
-                if max_rows and len(interleaved) >= max_rows:
-                    break
-        if max_rows and len(interleaved) >= max_rows:
+    # ── round-robin 으로 행 생성 ────────────────────────────────
+    for r in range(ROWS_PER):
+        for task_idx, task in enumerate(dataset):
+            if len(rows) >= MAX_LEN:
+                break
+
+            n_grid = len(task)
+            # grid 네 개 뽑아서 3개는 train, 1개는 test
+            g_idx  = rng.choice(n_grid, size=4, replace=n_grid < 4)
+            train_grids = [task[i] for i in g_idx[:3]]
+            test_grid   = task[g_idx[3]]
+
+            test_input   = [{'input': test_grid['input']}]
+            test_output  = [test_grid['output']]
+            combined     = [{'input': test_grid['input'],
+                             'output': test_grid['output']}]
+
+            rows.append(
+                {
+                    'task'        : filenames[task_idx],
+                    'train'       : train_grids,
+                    'test_input'  : test_input,
+                    'test_output' : test_output,
+                    'test'        : combined,
+                }
+            )
+        if len(rows) >= MAX_LEN:
             break
 
-    return pd.DataFrame(interleaved)
+    return pd.DataFrame(rows)
+
 
 def parse_args():
     '''

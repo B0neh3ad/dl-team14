@@ -313,21 +313,14 @@ class ARCSolver:
         N_prompt = input_ids.numel()
 
         output = output[N_prompt:].tolist()
-        train_input = np.array(prompt['train'][0]['input'])
-        train_output = np.array(prompt['train'][0]['output'])
         test_input = np.array(prompt['input'])
 
         # LLM-generated grid may have wrong shape
         # So adjust shape by input-output pairs
-        if train_input.shape == train_output.shape:
-            x, y = test_input.shape
-        else:
-            x = (train_output.shape[0] // train_input.shape[0]) * test_input.shape[0]
-            y = (train_output.shape[1] // train_input.shape[1]) * test_input.shape[1]
+        x, y = test_input.shape
 
         try:
             grid = np.array(self.parse_grid(output))
-            grid = grid[:x, :y]
             
         except Exception as e:
             grid = np.random.randint(0, 10, (x, y))
@@ -355,7 +348,3 @@ class ARCSolver:
 
 if __name__ == "__main__":
     solver = ARCSolver()
-
-
-
-
