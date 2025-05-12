@@ -9,6 +9,8 @@ import wandb
 import yaml
 import argparse
 
+from arc import apply_all_data_augmentations
+
 class args_default:
     # default values for training
     # imported from baseline code
@@ -133,6 +135,9 @@ def load_data(base_dir, args=None):
             'test_output': test_outputs,
             'test': combined_tests,
         })
+
+    if args.use_data_augmentation:
+        data = apply_all_data_augmentations(data)
 
     df = pd.DataFrame(data)
     return df

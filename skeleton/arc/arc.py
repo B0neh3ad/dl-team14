@@ -288,49 +288,51 @@ class ARCSolver:
             output (List[List[int]]): A 2d grid,
                 which is the output of given input question.
         """
-        datapoint = {
-            "train": examples,
-            "test": [
-                {
-                    "input": questions_input
-                }
-            ]
-        }
+        from arc.algo.solver import run_main_solvers
+        grid = run_main_solvers(examples, questions_input)
+        # datapoint = {
+        #     "train": examples,
+        #     "test": [
+        #         {
+        #             "input": questions_input
+        #         }
+        #     ]
+        # }
 
-        prompt = self.format_prompt(datapoint)
-        input_ids = torch.tensor(prompt['input_ids'], dtype=torch.long).to(self.device).view(1, -1)
+        # prompt = self.format_prompt(datapoint)
+        # input_ids = torch.tensor(prompt['input_ids'], dtype=torch.long).to(self.device).view(1, -1)
 
-        config = GenerationConfig(
-            do_sample=False,
-            pad_token_id=self.tokenizer.eos_token_id,
-            max_new_tokens=150,
-        )
+        # config = GenerationConfig(
+        #     do_sample=False,
+        #     pad_token_id=self.tokenizer.eos_token_id,
+        #     max_new_tokens=150,
+        # )
 
-        output = self.model.generate(
-            input_ids=input_ids,
-            generation_config=config,
-        ).squeeze().cpu()
-        N_prompt = input_ids.numel()
+        # output = self.model.generate(
+        #     input_ids=input_ids,
+        #     generation_config=config,
+        # ).squeeze().cpu()
+        # N_prompt = input_ids.numel()
 
-        output = output[N_prompt:].tolist()
-        train_input = np.array(prompt['train'][0]['input'])
-        train_output = np.array(prompt['train'][0]['output'])
-        test_input = np.array(prompt['input'])
+        # output = output[N_prompt:].tolist()
+        # train_input = np.array(prompt['train'][0]['input'])
+        # train_output = np.array(prompt['train'][0]['output'])
+        # test_input = np.array(prompt['input'])
 
-        # LLM-generated grid may have wrong shape
-        # So adjust shape by input-output pairs
-        if train_input.shape == train_output.shape:
-            x, y = test_input.shape
-        else:
-            x = (train_output.shape[0] // train_input.shape[0]) * test_input.shape[0]
-            y = (train_output.shape[1] // train_input.shape[1]) * test_input.shape[1]
+        # # LLM-generated grid may have wrong shape
+        # # So adjust shape by input-output pairs
+        # if train_input.shape == train_output.shape:
+        #     x, y = test_input.shape
+        # else:
+        #     x = (train_output.shape[0] // train_input.shape[0]) * test_input.shape[0]
+        #     y = (train_output.shape[1] // train_input.shape[1]) * test_input.shape[1]
 
-        try:
-            grid = np.array(self.parse_grid(output))
-            grid = grid[:x, :y]
+        # try:
+        #     grid = np.array(self.parse_grid(output))
+        #     grid = grid[:x, :y]
             
-        except Exception as e:
-            grid = np.random.randint(0, 10, (x, y))
+        # except Exception as e:
+        #     grid = np.random.randint(0, 10, (x, y))
 
         return grid
 
@@ -338,19 +340,19 @@ class ARCSolver:
         """
         Load pretrained weight, make model eval mode, etc.
         """
-        # Load config yaml file
-        # NOTE: You should locate config file in this path!
-        config_path = "artifacts/config/config.yaml"
-        with open(config_path, "r") as f:
-            config_dict = yaml.safe_load(f)
+        # # Load config yaml file
+        # # NOTE: You should locate config file in this path!
+        # config_path = "artifacts/config/config.yaml"
+        # with open(config_path, "r") as f:
+        #     config_dict = yaml.safe_load(f)
         
-        args = argparse.Namespace(**config_dict)
+        # args = argparse.Namespace(**config_dict)
 
-        # Setup model and tokenizer with config
-        self.setup(args)
+        # # Setup model and tokenizer with config
+        # self.setup(args)
 
-        self.model.load_adapter(args.output_dir)
-        self.model.eval()
+        # self.model.load_adapter(args.output_dir)
+        # self.model.eval()
 
 
 if __name__ == "__main__":
