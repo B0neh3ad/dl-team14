@@ -176,7 +176,6 @@ poetry.toml
 pyrightconfig.json
 
 # Checkpoints
-checkpoint-final/*
 checkpoint-*
 
 # local files
@@ -186,7 +185,7 @@ checkpoint-*
 dataset/output_images
 
 # configuration files
-config
+# config
 
 # Cached files from wandb, unsloth
 unsloth_compiled_cache
