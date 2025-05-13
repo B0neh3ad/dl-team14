@@ -21,9 +21,9 @@ class args_default:
     max_seq_len = 2048
 
     dataset_len = 2000
-    val_size = 0.1
+    val_size = 0.02
 
-    epochs = 5
+    epochs = 1
     warmup_ratio = 0.1
     learning_rate = 2e-4
     lr_scheduler = "linear"
@@ -33,12 +33,12 @@ class args_default:
     do_eval = True
     eval_strategy = "steps"
     eval_steps = 20
-    save_steps = 20
+    save_steps = 100
     logging_steps = 10
     log_level = "debug"
 
-    train_batch_size = 4
-    grad_acc_steps = 4
+    train_batch_size = 2
+    grad_acc_steps = 8
     eval_batch_size = 4
 
     wandb = True
@@ -70,7 +70,7 @@ class adapter_config_default:
     megatron_core = "megatron.core"
     modules_to_save = None
     peft_type = "LORA"
-    r = 4
+    r = 64
     rank_pattern = {}
     revision = None
     target_modules = [
@@ -108,31 +108,31 @@ def load_data(base_dir, args=None):
 
     N = len(dataset)
 
-    while len(data) < MAX_LEN:
-        
-        task_idx = rng.integers(0, N) # 랜덤으로 task 선택
+    for task_idx in range(N):
         task = dataset[task_idx]
         file_name = filenames[task_idx]
-
         n_task = len(task)
-        grids_idx =  rng.choice(n_task, size=4, replace=True) # 앞서 추출한 task에서 랜덤으로 4개의 grid 선택
-        train_grids = [task[i] for i in grids_idx[:3]] # 3개는 train data로 사용
-        test_grids = [task[i] for i in grids_idx[3:]] # 1개는 test data로 사용
+        for j in range(0, n_task, 4):
+            if j + 4 > n_task:
+                break
+            grids_idx =  [j, j+1, j+2, j+3]
+            train_grids = [task[i] for i in grids_idx[:3]] # 3개는 train data로 사용
+            test_grids = [task[i] for i in grids_idx[3:]] # 1개는 test data로 사용
 
-        test_inputs = [{'input': grid['input']} for grid in test_grids]
-        test_outputs = [grid['output'] for grid in test_grids]
-        test_outputs_transformed = [{'output': grid} for grid in test_outputs]
-        combined_tests = []
-        for test_input, test_output in zip(test_inputs, test_outputs_transformed):
-            combined_tests.append({'input': test_input['input'], 'output': test_output['output']})
+            test_inputs = [{'input': grid['input']} for grid in test_grids]
+            test_outputs = [grid['output'] for grid in test_grids]
+            test_outputs_transformed = [{'output': grid} for grid in test_outputs]
+            combined_tests = []
+            for test_input, test_output in zip(test_inputs, test_outputs_transformed):
+                combined_tests.append({'input': test_input['input'], 'output': test_output['output']})
 
-        data.append({
-            'task': file_name,
-            'train': train_grids,
-            'test_input': test_inputs,
-            'test_output': test_outputs,
-            'test': combined_tests,
-        })
+            data.append({
+                'task': file_name,
+                'train': train_grids,
+                'test_input': test_inputs,
+                'test_output': test_outputs,
+                'test': combined_tests,
+            })
 
     df = pd.DataFrame(data)
     return df
