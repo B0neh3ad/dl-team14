@@ -313,14 +313,29 @@ class ARCSolver:
         N_prompt = input_ids.numel()
 
         output = output[N_prompt:].tolist()
+        train_input = np.array(prompt['train'][0]['input'])
+        train_output = np.array(prompt['train'][0]['output'])
         test_input = np.array(prompt['input'])
 
         # LLM-generated grid may have wrong shape
         # So adjust shape by input-output pairs
-        x, y = test_input.shape
+        h_in,  w_in  = train_input.shape
+        h_out, w_out = train_output.shape
+        h_test, w_test = test_input.shape
+
+# ① train 변환에서 scale·offset 추출
+        scale_h  = h_out / h_in               # 세로 배율
+        scale_w  = w_out / w_in               # 가로 배율
+        offset_h = h_out - scale_h * h_in     # 세로 패딩(+)/크롭(-)
+        offset_w = w_out - scale_w * w_in     # 가로 패딩(+)/크롭(-)
+
+# ② test 입력에 동일 변환 적용
+        x = int(round(scale_h * h_test + offset_h))
+        y = int(round(scale_w * w_test + offset_w))
 
         try:
             grid = np.array(self.parse_grid(output))
+            grid = grid[:x, :y]
             
         except Exception as e:
             grid = np.random.randint(0, 10, (x, y))
@@ -348,3 +363,7 @@ class ARCSolver:
 
 if __name__ == "__main__":
     solver = ARCSolver()
+
+
+
+
