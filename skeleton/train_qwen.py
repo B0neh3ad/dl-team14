@@ -20,10 +20,10 @@ class args_default:
     # default values for training
     # imported from baseline code
 
-    model_id = "Qwen/Qwen3-8B-FP8"
-    output_dir = "artifacts/checkpoint-qwen"
+    model_id = "Qwen/Qwen2.5-3B-Instruct"
+    output_dir = "artifacts/checkpoint-qwen-3B"
     adapter_path = "artifacts/checkpoint-qwen"
-    config_path = "artifacts/config/config-qwen.yaml"
+    config_path = "artifacts/config/config-qwen-3B.yaml"
 
     max_seq_len = 2048
 
@@ -39,14 +39,14 @@ class args_default:
 
     do_eval = True
     eval_strategy = "steps"
-    eval_steps = 20
+    eval_steps = 100
     save_steps = 100
     logging_steps = 10
     log_level = "debug"
 
     train_batch_size = 2
     grad_acc_steps = 8
-    eval_batch_size = 4
+    eval_batch_size = 1
 
     wandb = True
 
@@ -159,7 +159,7 @@ def parse_args():
     parser.add_argument("--max-seq-len", type=int, default=args_default.max_seq_len, help="Max sequence length")
     
     # Model Configuration
-    parser.add_argument("--attn-impl", type=str, default="sdpa", help="Attention implementation")
+    parser.add_argument("--attn-impl", type=str, default="flash", help="Attention implementation")
     parser.add_argument("--use-cache", action="store_true", help="Use cache")
 
     # Dataset Configuration
@@ -353,7 +353,7 @@ def main():
         args.model_id,
         trust_remote_code=True, # Allow the model to use custom code from the repository
         quantization_config=bnb_config, # Apply the 4-bit quantization configuration
-        attn_implementation=args.attn_impl, # Use scaled-dot product attention for better performance
+        # attn_implementation=args.attn_impl, # Use scaled-dot product attention for better performance
         use_cache=args.use_cache, # Disable caching to save memory
         device_map='auto', # Automatically map the model to available devices (e.g., GPUs)
         token=token,

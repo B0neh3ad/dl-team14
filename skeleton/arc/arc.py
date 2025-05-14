@@ -78,8 +78,8 @@ class ARCSolver:
         training_data = datapoint['train']
         input_test_data = datapoint['test'][0]['input']
 
-        sys = self.tokenizer.encode("<|begin_of_text|><|start_header_id|>system<|end_header_id|>" + "\n" + system_prompt, add_special_tokens=False)
-        user = self.tokenizer.encode("<|start_header_id|>user<|end_header_id|>" + "\n" + user_message_template1 + "\n", add_special_tokens=False)
+        sys = self.tokenizer.encode("<|im_start|>system\n" + system_prompt + "<|im_end|>\n", add_special_tokens=False)
+        user = self.tokenizer.encode("<|im_start|>user\n" + user_message_template1 + "\n", add_special_tokens=False)
         inp_desc = self.tokenizer.encode("input:\n", add_special_tokens=False)
         out_desc = self.tokenizer.encode("output:\n", add_special_tokens=False)
         for ex in training_data:
@@ -97,17 +97,18 @@ class ARCSolver:
 
         user += inp_desc
         user += self.format_grid(input_test_data)
-        user += self.tokenizer.encode("\n" + user_message_template3, add_special_tokens=False)
+        user += self.tokenizer.encode("\n" + user_message_template3 + "<|im_end|>\n", add_special_tokens=False)
 
 
         messages = sys + user
-        assis = self.tokenizer.encode("<|eot_id|><|start_header_id|>assistant<|end_header_id|>", add_special_tokens=False)
+        assis = self.tokenizer.encode("<|im_start|>assistant\n", add_special_tokens=False)
 
         if is_train:
             # attach labels to data
             output_test_data = datapoint['test'][0]['output']
             labels = self.format_grid(output_test_data)
             assis += labels
+            assis += self.tokenizer.encode("<|im_end|>\n", add_special_tokens=False)
         messages += assis
         
         attention_mask = [1] * len(messages)
@@ -326,8 +327,9 @@ class ARCSolver:
             y = (train_output.shape[1] // train_input.shape[1]) * test_input.shape[1]
 
         try:
+            print(f"output: {output}")
             grid = np.array(self.parse_grid(output))
-            grid = grid[:x, :y]
+            # grid = grid[:x, :y]
             
         except Exception as e:
             grid = np.random.randint(0, 10, (x, y))
@@ -340,7 +342,7 @@ class ARCSolver:
         """
         # Load config yaml file
         # NOTE: You should locate config file in this path!
-        config_path = "artifacts/config/config.yaml"
+        config_path = "artifacts/config/config-qwen.yaml"
         with open(config_path, "r") as f:
             config_dict = yaml.safe_load(f)
         
