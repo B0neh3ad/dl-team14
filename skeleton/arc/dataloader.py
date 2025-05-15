@@ -34,19 +34,68 @@ class ArcDataLoader:
             ]
         return cls(challenge)
 
-    def make_dataset(size, fmt_opts): ### size만큼 grid 뽑아서 dataset 생성, ex size=4면 한 rule에서 input/output grid 4쌍 뽑아서 dataset생성
+    def format_grid(self, grid):
+        """
+        Format 2D grid into LLM input tokens
+
+        Args:
+            grid (List[List[int]]): 2D grid
+
+        Returns:
+            ids (List[int]): Token list for LLM
+        """
+        ids = []
+
+        for row in grid:
+            for col in row:
+                ids.append(str(col))
+            ids.append(fmt_opts.lines_sep)
+        return ids
+
+    def make_dataset(self, size, fmt_opts, is_train): ### size만큼 grid 뽑아서 dataset 생성, ex size=4면 한 rule에서 input/output grid 4쌍 뽑아서 dataset생성
+        dataset = []
+        for rule_name, items in self.challenge.items():
+            n = len(items)
+            for j in range(0, n, size):
+                if j + size > n:
+                    break
+                group = items[j: j + size]
+                dataset.append({"rule": rule_name, "data": group})
+        return data_format(dataset, fmt_opts, is_train) # 이거 끝나면 "rule" : "data" 들의 list생성
+
+    def data_format(self, dataset, fmt_opts, is_train): # 이제 dataset에 있는 각데이터들 LLM에 인풋으로 넣을 수 있게 바꾸는게 목표
+
+        datasets = []
         
+        for item in dataset:
+            message = fmt_opts.prompt
+            message += fmt_opts.query_beg
+            inp = self.parse_grid(item["input"], fmt_opts)
+            message += inp
+            message += fmt_opts.reply_beg
+            outp = self.parse_grid(item["output"], fmt_opts)
+            message += fmt_opts.reply_end
+            messages.append(message)
+            attention_mask = [1] * len(message)
+            
+            if is_train:
+                datasets.append({"input_ids": message,
+                                "attention_mask": attention_mask})
+            else:
+                datasets.append({"input_ids": message,
+                                "attention_mask": attention_mask,
+                                "train": item["data"][:3],
+                                "input": item["data"][3]["input"]})
+
+        return datasets                        
+
 
 
 
 def __main__():
     train_dataset = ArcDataLoader.load_from_json("../../dataset")
-    print(train_dataset.challenge["007bbfb7"][0]["input"])
-    key = train_dataset.keys[0]
-    rule,idx,io_type = key.split("_")
-    idx = int(idx)
-    print(rule, idx, io_type)
-    print(train_dataset.challenge[rule][idx][io_type])
+    dataset = train_dataset.make_dataset(4, 2, False)
+    print(dataset[0])
 
 if __name__ == "__main__":
     __main__()
