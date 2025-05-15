@@ -5,11 +5,13 @@ import torch
 from typing import List
 import numpy as np
 import yaml
+import re
 
-from .utils import system_prompt, user_message_template1, user_message_template2, user_message_template3
+from .utils import system_prompt
 from transformers import BitsAndBytesConfig, AutoModelForCausalLM, AutoTokenizer, TrainingArguments, pipeline
 from trl import SFTConfig, SFTTrainer, DataCollatorForCompletionOnlyLM
 from peft import PeftModelForCausalLM
+from model_tools import load_unsloth_4bit, keep_single_char_tokens, save_model_and_tokenizer
 
 class ARCSolver:
     """
@@ -78,10 +80,9 @@ class ARCSolver:
         training_data = datapoint['train']
         input_test_data = datapoint['test'][0]['input']
 
-        sys = self.tokenizer.encode("<|begin_of_text|><|start_header_id|>system<|end_header_id|>" + "\n" + system_prompt, add_special_tokens=False)
-        user = self.tokenizer.encode("<|start_header_id|>user<|end_header_id|>" + "\n" + user_message_template1 + "\n", add_special_tokens=False)
-        inp_desc = self.tokenizer.encode("input:\n", add_special_tokens=False)
-        out_desc = self.tokenizer.encode("output:\n", add_special_tokens=False)
+        sys = self.tokenizer.encode(system_prompt, add_special_tokens=False)
+        inp_desc = self.tokenizer.encode("I", add_special_tokens=False)
+        out_desc = self.tokenizer.encode("", add_special_tokens=False)
         for ex in training_data:
             inp = ex['input']
             out = ex['output']
@@ -93,12 +94,9 @@ class ARCSolver:
             user += out_desc
             user += out
 
-        user += self.tokenizer.encode("\n" + user_message_template2 + "\n", add_special_tokens=False)
 
         user += inp_desc
         user += self.format_grid(input_test_data)
-        user += self.tokenizer.encode("\n" + user_message_template3, add_special_tokens=False)
-
 
         messages = sys + user
         assis = self.tokenizer.encode("<|eot_id|><|start_header_id|>assistant<|end_header_id|>", add_special_tokens=False)
@@ -106,7 +104,7 @@ class ARCSolver:
         if is_train:
             # attach labels to data
             output_test_data = datapoint['test'][0]['output']
-            labels = self.format_grid(output_test_data)
+            labels = self.format_grid(output_test_data) 
             assis += labels
         messages += assis
         
@@ -151,6 +149,8 @@ class ARCSolver:
         self.tokenizer = AutoTokenizer.from_pretrained(args.model_id, token=self.token)
         if self.tokenizer.pad_token is None:
             self.tokenizer.pad_token = self.tokenizer.eos_token
+        keep_tok = list('ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789!?.:,;*+/-=')+tokenizer.tokenize('\n')
+        keep_single_char_tokens(model, tokenizer, keep=keep_tok, remove_unk=True)
 
         self.pixel_ids = [
             self.tokenizer.encode(str(i), add_special_tokens=False)[0] for i in range(10)
@@ -313,32 +313,30 @@ class ARCSolver:
         N_prompt = input_ids.numel()
 
         output = output[N_prompt:].tolist()
-        train_input = np.array(prompt['train'][0]['input'])
-        train_output = np.array(prompt['train'][0]['output'])
         test_input = np.array(prompt['input'])
 
-        # LLM-generated grid may have wrong shape
-        # So adjust shape by input-output pairs
-        h_in,  w_in  = train_input.shape
-        h_out, w_out = train_output.shape
-        h_test, w_test = test_input.shape
+                # 1. 토큰 리스트 디코딩
+        decoded_text = self.tokenizer.decode(output[:10], skip_special_tokens=True)
 
-# ① train 변환에서 scale·offset 추출
-        scale_h  = h_out / h_in               # 세로 배율
-        scale_w  = w_out / w_in               # 가로 배율
-        offset_h = h_out - scale_h * h_in     # 세로 패딩(+)/크롭(-)
-        offset_w = w_out - scale_w * w_in     # 가로 패딩(+)/크롭(-)
+        # 2. 숫자 추출
+        pattern = r'\((\d+\.?\d*),\s*(\d+\.?\d*)\)'
+        match = re.search(pattern, decoded_text)
 
-# ② test 입력에 동일 변환 적용
-        x = int(round(scale_h * h_test + offset_h))
-        y = int(round(scale_w * w_test + offset_w))
+        if match:
+            width_str, height_str = match.groups()
+            width = int(width_str)
+            height = int(height_str)
+
+        else:
+            width, height = test_input.shape  # 패턴 미발견 시 처리
+        
 
         try:
             grid = np.array(self.parse_grid(output))
-            grid = grid[:x, :y]
+            grid = grid[:width, :height]
             
         except Exception as e:
-            grid = np.random.randint(0, 10, (x, y))
+            grid = np.random.randint(0, 10, (width, height))
 
         return grid
 

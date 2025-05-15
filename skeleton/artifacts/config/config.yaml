@@ -25,6 +25,8 @@ lora_target_modules:
 - v_proj
 - k_proj
 - q_proj
+- embed_tokens
+- lm_head
 lora_task_type: CAUSAL_LM
 lr_scheduler: linear
 max_seq_len: 2048
