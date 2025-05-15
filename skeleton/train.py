@@ -8,6 +8,8 @@ import numpy as np
 import wandb
 import yaml
 import argparse
+from arc.dataloader import ArcDataLoader
+from datasets import Dataset
 
 class args_default:
     # default values for training
@@ -87,64 +89,6 @@ class adapter_config_default:
     use_dora = False
     use_rslora = False
     
-def load_data(base_dir, args=None):
-    """
-    ───────────────────────────────────────────────────────────────
-    같은 함수 호출형태(load_data(base_dir, args=None)) 유지.
-      • base_dir 안 *.json 각각을 하나의 task 로 간주
-      • **task 당 정확히 6 row** 만들어서 총 1 800 row(300 task × 6)
-      • row 순서는   task0-row0, task1-row0, …, task299-row0,
-                     task0-row1, task1-row1, …   처럼 round-robin.
-      • row 구조는 기존과 동일(train 3개 + test 1개)
-    ───────────────────────────────────────────────────────────────
-    """
-    # ── 파일 읽기 ────────────────────────────────────────────────
-    filenames = sorted(f for f in os.listdir(base_dir) if f.endswith(".json"))
-    data_files = [os.path.join(base_dir, f) for f in filenames]
-
-    dataset = []
-    for path in data_files:
-        with open(path) as fp:
-            dataset.append(json.load(fp))
-
-    filenames = [os.path.splitext(f)[0] for f in filenames]  # 확장자 제거
-    N_TASK     = len(dataset)
-    ROWS_PER   = 6                                           # task당 6개
-    MAX_LEN    = args.dataset_len if args else N_TASK * ROWS_PER
-
-    rng = np.random.default_rng(42)
-    rows = []
-
-    # ── round-robin 으로 행 생성 ────────────────────────────────
-    for r in range(ROWS_PER):
-        for task_idx, task in enumerate(dataset):
-            if len(rows) >= MAX_LEN:
-                break
-
-            n_grid = len(task)
-            # grid 네 개 뽑아서 3개는 train, 1개는 test
-            g_idx  = rng.choice(n_grid, size=4, replace=n_grid < 4)
-            train_grids = [task[i] for i in g_idx[:3]]
-            test_grid   = task[g_idx[3]]
-
-            test_input   = [{'input': test_grid['input']}]
-            test_output  = [test_grid['output']]
-            combined     = [{'input': test_grid['input'],
-                             'output': test_grid['output']}]
-
-            rows.append(
-                {
-                    'task'        : filenames[task_idx],
-                    'train'       : train_grids,
-                    'test_input'  : test_input,
-                    'test_output' : test_output,
-                    'test'        : combined,
-                }
-            )
-        if len(rows) >= MAX_LEN:
-            break
-
-    return pd.DataFrame(rows)
 
 
 def parse_args():
@@ -247,10 +191,11 @@ def main():
     set_seed(1234567890)
 
     data_path = "/workspace/dataset"
-    df = load_data(data_path, args)
 
-    from datasets import Dataset
-    dataset = Dataset.from_pandas(df).shuffle(42)
+    dataloader = ArcDataLoader.load_from_json(data_path)
+    dataset_list = dataloader.make_dataset(4, solver.fmt_opts, True)
+    dataset = Dataset.from_list(dataset_list)
+
 
     train_val_split = dataset.train_test_split(test_size=args.val_size, seed=42)
     train_dataset = train_val_split['train']
@@ -265,7 +210,9 @@ def main():
             config=args,
         )
 
-    solver.train(train_dataset, val_dataset, args)
+    print(train_dataset)
+
+#    solver.train(train_dataset, val_dataset, args)
 
     if args.wandb:
         # Finish the run

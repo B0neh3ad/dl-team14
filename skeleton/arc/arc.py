@@ -26,6 +26,14 @@ class ARCSolver:
         """
         self.token = token
         self.device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+        self.fmt_opts = dict(
+            preprompt='ABCDEFGHJKLMNPQRSTUVWXYZabcdefghjklmnpqrstuvwxyz',
+            query_beg='I',
+            reply_beg='\n+/-=O',
+            reply_end='\n',
+            lines_sep='\n',
+            max_tokens=128000,
+        )
 
     def parse_grid(self, ids: List[int]):
         """
@@ -129,19 +137,6 @@ class ARCSolver:
                 task_type=args.lora_task_type,
             )
             self.model = prepare_model_for_kbit_training(self.model)
-
-        # Format dataset
-        print('*** Format dataset ***')
-        # TODO: implement batched processing
-        train_dataset = train_dataset.map(
-            lambda x: self.format_prompt(x, is_train=True),
-            remove_columns=train_dataset.column_names,
-        )
-
-        val_dataset = val_dataset.map(
-            lambda x: self.format_prompt(x, is_train=True),
-            remove_columns=val_dataset.column_names,
-        )
 
         # Set data collator
         print('\n*** Set data collator ***')
