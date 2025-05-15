@@ -24,6 +24,7 @@ color_map = {
     9: "bright_green",
 }
 
+
 console = Console()
 
 def make_rich_lines(grid: List[List[int]]) -> List[Text]:

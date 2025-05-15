@@ -12,6 +12,7 @@ from transformers import BitsAndBytesConfig, AutoModelForCausalLM, AutoTokenizer
 from trl import SFTConfig, SFTTrainer, DataCollatorForCompletionOnlyLM
 from peft import PeftModelForCausalLM
 from model_tools import load_unsloth_4bit, keep_single_char_tokens, save_model_and_tokenizer
+from model_tools import InputMaskingDataCollator
 
 class ARCSolver:
     """
@@ -81,8 +82,9 @@ class ARCSolver:
         input_test_data = datapoint['test'][0]['input']
 
         sys = self.tokenizer.encode(system_prompt, add_special_tokens=False)
-        inp_desc = self.tokenizer.encode("I", add_special_tokens=False)
-        out_desc = self.tokenizer.encode("", add_special_tokens=False)
+        inp_desc = self.tokenizer.encode(self.fmt_opts["query_beg"], add_special_tokens=False)
+        out_desc = self.tokenizer.encode(self.fmt_opts["reply_beg"], add_special_tokens=False)
+        out_end = self.tokenizer.encode(self.fmt_opts["reply_end"], add_special_tokens=False)
         for ex in training_data:
             inp = ex['input']
             out = ex['output']
@@ -90,23 +92,25 @@ class ARCSolver:
             out = self.format_grid(out)
 
             user += inp_desc
-            user += inp
+            user += inpx
             user += out_desc
             user += out
+            user += out_end
 
 
         user += inp_desc
         user += self.format_grid(input_test_data)
+        user += out_desc
 
-        messages = sys + user
-        assis = self.tokenizer.encode("<|eot_id|><|start_header_id|>assistant<|end_header_id|>", add_special_tokens=False)
+        messages = sys + user 
+
 
         if is_train:
             # attach labels to data
             output_test_data = datapoint['test'][0]['output']
             labels = self.format_grid(output_test_data) 
-            assis += labels
-        messages += assis
+            messages += self.fmt_opts["reply_end"]
+        
         
         attention_mask = [1] * len(messages)
 
@@ -156,6 +160,15 @@ class ARCSolver:
             self.tokenizer.encode(str(i), add_special_tokens=False)[0] for i in range(10)
         ]
         self.sep = self.tokenizer.encode("\n", add_special_tokens=False)[0]
+        self.fmt_opts = dict(
+            preprompt='ABCDEFGHJKLMNPQRSTUVWXYZabcdefghjklmnpqrstuvwxyz',
+            query_beg='I',
+            reply_beg='\n+/-=O',
+            reply_end='\n' + self.tokenizer.eos_token,
+            lines_sep='\n',
+            max_tokens=128000,
+        )
+
 
 
     def train(self, train_dataset, val_dataset=None, args=None):
@@ -212,10 +225,12 @@ class ARCSolver:
 
         # Set data collator
         print('\n*** Set data collator ***')
-        data_collator = DataCollatorForCompletionOnlyLM(
-            tokenizer=self.tokenizer,
-            # instruction_template='<|start_header_id|>user<|end_header_id|>',
-            response_template='<|start_header_id|>assistant<|end_header_id|>',
+        data_collator = InputMaskingDataCollator(
+                instruction_template=self.fmt_opts['query_beg'],
+                response_template=self.fmt_opts['reply_beg'],
+                mlm=False,
+                tokenizer=self.tokenizer,
+                mask_first_n_examples=1,
         )
 
         # Set training arguments
