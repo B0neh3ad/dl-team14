@@ -11,8 +11,8 @@ from .utils import system_prompt
 from transformers import BitsAndBytesConfig, AutoModelForCausalLM, AutoTokenizer, TrainingArguments, pipeline
 from trl import SFTConfig, SFTTrainer, DataCollatorForCompletionOnlyLM
 from peft import PeftModelForCausalLM
-from model_tools import load_unsloth_4bit, keep_single_char_tokens, save_model_and_tokenizer
-from model_tools import InputMaskingDataCollator
+from arc.model_tools import load_unsloth_4bit, keep_single_char_tokens, save_model_and_tokenizer
+from arc.model_tools import InputMaskingDataCollator
 
 class ARCSolver:
     """
