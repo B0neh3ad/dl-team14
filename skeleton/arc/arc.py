@@ -302,30 +302,33 @@ class ARCSolver:
 
         # Setup model and tokenizer with config
         self.setup(args)
-        self.model.gradient_checkpointing_enable()
-        self.model.enable_input_require_grads()
+        # self.model.gradient_checkpointing_enable()
+        # self.model.enable_input_require_grads()
 
         # Load LoRA Adapter
         print(f'\n*** Loading adapter from {args.adapter_path} ***')
-        self.model = prepare_model_for_kbit_training(self.model)
-        self.model = PeftModelForCausalLM.from_pretrained(
-            self.model,
-            args.adapter_path,
-            device_map="auto",
-            is_trainable=True,
+        # self.model = prepare_model_for_kbit_training(self.model)
+        self.model = FastLanguageModel.get_peft_model(
+            model=self.model,
+            target_modules=args.lora_target_modules,
+            r=args.lora_r,
+            lora_alpha=args.lora_alpha,
+            lora_dropout=args.lora_dropout,
+            bias=args.lora_bias,
+            use_gradient_checkpointing=True,
+            random_state=42,
+            use_rslora=args.use_rslora,
+            loftq_config=None,
         )
 
         # Format dataset
         print('*** Format dataset ***')
-        # TODO: implement batched processing
         train_dataset = train_dataset.map(
             lambda x: self.format_prompt(x, is_train=True),
-            remove_columns=train_dataset.column_names,
         )
 
         val_dataset = val_dataset.map(
             lambda x: self.format_prompt(x, is_train=True),
-            remove_columns=val_dataset.column_names,
         )
 
         # Set data collator
@@ -341,10 +344,10 @@ class ARCSolver:
         batch_size_kwargs = dict(
             per_device_train_batch_size=args.train_batch_size,  # 4-16 should be fine for lora.
             gradient_accumulation_steps=args.grad_acc_steps,
-            per_device_eval_batch_size=args.eval_batch_size,
+            # per_device_eval_batch_size=args.eval_batch_size,
         )
 
-        training_arguments = SFTConfig(
+        training_arguments = TrainingArguments(
             output_dir=args.output_dir,
             num_train_epochs=args.epochs,
             # max_steps=args.max_steps,
@@ -360,25 +363,34 @@ class ARCSolver:
             save_steps=args.eval_steps,
             logging_steps=args.logging_steps,
             log_level=args.log_level,
+            embedding_learing_rate=1e-5,
+            fp16=not is_bfloat16_supported(),
+            bf16=is_bfloat16_supported(),
+            seed=42,
+            save_strategy="no",
 
-            max_seq_length=args.max_seq_len,
-            label_names=["labels"],
+            # max_seq_length=args.max_seq_len,
+            # label_names=["labels"],
             report_to="wandb" if args.wandb else "none",
 
             **batch_size_kwargs
         )
 
-        # Train the model with SFTTrainer
-        print('\n*** Train the model with SFTTrainer ***')
-        trainer = SFTTrainer(
+        # Train the model with Trainer
+        print('\n*** Train the model with Trainer ***')
+        trainer = Trainer(
             model=self.model,
+            tokenizer=self.tokenizer,
             train_dataset=train_dataset,
             eval_dataset=val_dataset,
+            dataset_text_field="text",
+            max_seq_length=args.max_seq_len,
+            packing=False,
             data_collator=data_collator,
             args=training_arguments,
         )
 
-        trainer.train()
+        trainer_stats = unsloth_train(trainer)
 
     def predict(self, examples, questions_input):
         """
