@@ -1,7 +1,7 @@
 export HF_TOKEN=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
-cd /home/student/workspace/skeleton/
-source /home/student/workspace/skeleton/setup.sh
+cd /home/jupyter-b0neh3ad/dl-team14/skeleton
+source ./setup.sh
 
 eval "$(conda shell.bash hook)"
-conda activate $EVAL_ENV
+conda activate venv
 python train.py --debug

@@ -9,7 +9,7 @@ import yaml
 import json
 
 from transformers import BitsAndBytesConfig, AutoModelForCausalLM, AutoTokenizer, TrainingArguments, pipeline
-from trl import SFTConfig, SFTTrainer, DataCollatorForCompletionOnlyLM
+from trl import DataCollatorForCompletionOnlyLM
 from peft import PeftModelForCausalLM
 from unsloth import FastLanguageModel
 from unsloth import UnslothTrainer as Trainer, unsloth_train, is_bfloat16_supported
@@ -27,6 +27,7 @@ class TrainingSetMaskingCollator(DataCollatorForCompletionOnlyLM):
         # stop_after 문자열을 토큰 시퀀스로 미리 인코딩
         sub_ids = tokenizer(stop_after, add_special_tokens=False)["input_ids"]
         self.stop_seq = sub_ids
+        self.num_input_examples = num_input_examples
 
     def torch_call(self, examples):
         # (1) 기본 마스킹: prompt 전체 = -100, response = token ids
@@ -73,29 +74,6 @@ class ARCSolver:
         self.token = token
         self.device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
-    def parse_grid(self, ids: List[int]):
-        """
-        Parse LLM generated sequence into ARC grid format
-
-        Args:
-            ids (List[int]): LLM generated token list
-
-        Returns:
-            grid (List[List[int]]): parsed 2D grid
-        """
-        grid = []
-        row = []
-        inv_map = {k: i for i, k in enumerate(self.pixel_ids)}
-        
-        for idx in ids:
-            if idx == self.sep:
-                if len(row) > 0:
-                    grid.append(row.copy())
-                    row.clear()
-            else:
-                row.append(inv_map.get(idx, 0))
-        return grid
-
     def format_grid(self, grid: List[List[int]]):
         """
         Format 2D grid into LLM input tokens
@@ -104,14 +82,14 @@ class ARCSolver:
             grid (List[List[int]]): 2D grid
 
         Returns:
-            ids (List[int]): Token list for LLM
+            ids (str): grid for LLM
         """
-        ids = []
+        ids = ''
 
         for row in grid:
             for col in row:
-                ids.append(self.pixel_ids[col])
-            ids.append(self.sep)
+                ids += self.pixel_ids[col]
+            ids += self.format_ops['lines_sep']
         return ids
 
     def format_prompt(self, datapoint, is_train=False):
@@ -124,23 +102,14 @@ class ARCSolver:
             prompt (dict): dictionary that contains input ids and additional informations
         """
 
-        format_ops = dict(
-            preprompt = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz',
-            query_bag = 'I',
-            reply_beg = '\n+=*/=O',
-            reply_end = '\n' + self.tokenizer.eos_token,
-            lines_sep = '\n',
-            max_tokens = 128000,
-        )
-
         training_data = datapoint['train']
         input_test_data = datapoint['test'][0]['input']
 
-        query_beg = self.tokenizer.encode(format_ops['query_bag'], add_special_tokens=False)
-        reply_beg = self.tokenizer.encode(format_ops['reply_beg'], add_special_tokens=False)
-        reply_end = self.tokenizer.encode(format_ops['reply_end'], add_special_tokens=False)
+        query_beg = self.format_ops['query_bag']
+        reply_beg = self.format_ops['reply_beg']
+        reply_end = self.format_ops['reply_end']
 
-        user = self.tokenizer.encode(format_ops['preprompt'], add_special_tokens=False)
+        user = self.format_ops['preprompt']
         for ex in training_data:
             inp = ex['input']
             out = ex['output']
@@ -190,7 +159,7 @@ class ARCSolver:
                 tokens.update(self.get_or_map_special_tokens(v, mapping))
         if isinstance(data, list):
             for v in data:  # recursively process lists
-                tokens.update(self.set_or_map_special_tokens(v, mapping))
+                tokens.update(self.get_or_map_special_tokens(v, mapping))
         return tokens
         
     def remove_tokenizer_normalizer(self, tokenizer):
@@ -277,15 +246,22 @@ class ARCSolver:
             load_in_4bit=True,
         )
 
-        keep_tok = list("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789!?.,:;+-*/=")+tokenizer.tokenize('\n')
-        self.keep_single_char_tokens(tokenizer, keep=keep_tok, remove_unk=True)
-
         self.model = model
         self.tokenizer = tokenizer
 
-        self.pixel_ids = [
-            self.tokenizer.encode(str(i), add_special_tokens=False)[0] for i in range(10)
-        ]
+        keep_tok = list("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789!?.,:;+-*/=")+tokenizer.tokenize('\n')
+        self.keep_single_char_tokens(tokenizer, keep=keep_tok, remove_unk=True)
+
+        self.pixel_ids = [str(i) for i in range(10)]
+
+        self.format_ops = dict(
+            preprompt = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz',
+            query_bag = 'I',
+            reply_beg = '\n+=*/=O',
+            reply_end = '\n' + self.tokenizer.eos_token,
+            lines_sep = '\n',
+            max_tokens = 128000,
+        )
 
 
     def train(self, train_dataset, val_dataset=None, args=None):
@@ -335,8 +311,9 @@ class ARCSolver:
         print('\n*** Set data collator ***')
         data_collator = TrainingSetMaskingCollator(
             num_input_examples=3,
-            stop_after='\n+=*/=O',
-            tokenizer=self.tokenizer
+            stop_after=self.format_ops['reply_beg'],
+            tokenizer=self.tokenizer,
+            response_template=self.format_ops['reply_beg'],
         )
 
         # Set training arguments
@@ -363,7 +340,7 @@ class ARCSolver:
             save_steps=args.eval_steps,
             logging_steps=args.logging_steps,
             log_level=args.log_level,
-            embedding_learing_rate=1e-5,
+            embedding_learning_rate=1e-5,
             fp16=not is_bfloat16_supported(),
             bf16=is_bfloat16_supported(),
             seed=42,
