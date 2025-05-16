@@ -1,15 +1,64 @@
 import argparse
 from peft import LoraConfig, PeftModel, prepare_model_for_kbit_training
 from transformers import GenerationConfig
+from tokenizers import Tokenizer
 import torch
 from typing import List
 import numpy as np
 import yaml
+import json
 
-from .utils import system_prompt, user_message_template1, user_message_template2, user_message_template3
 from transformers import BitsAndBytesConfig, AutoModelForCausalLM, AutoTokenizer, TrainingArguments, pipeline
 from trl import SFTConfig, SFTTrainer, DataCollatorForCompletionOnlyLM
 from peft import PeftModelForCausalLM
+from unsloth import FastLanguageModel
+from unsloth import UnslothTrainer as Trainer, unsloth_train, is_bfloat16_supported
+from unsloth import UnslothTrainingArguments as TrainingArguments
+
+class TrainingSetMaskingCollator(DataCollatorForCompletionOnlyLM):
+    def __init__(self, num_input_examples=3, stop_after='', tokenizer=None, **kwargs):
+        """
+        stop_after: 이 문자열이 입력(프롬프트)에 등장한 뒤부터는
+                    마스킹을 해제할 기준점으로 사용
+        tokenizer:  문자열 → input_ids 매핑에 쓰일 토크나이저
+        **kwargs:    padding, max_length 등 슈퍼클래스 인자들
+        """
+        super().__init__(tokenizer=tokenizer, **kwargs)
+        # stop_after 문자열을 토큰 시퀀스로 미리 인코딩
+        sub_ids = tokenizer(stop_after, add_special_tokens=False)["input_ids"]
+        self.stop_seq = sub_ids
+
+    def torch_call(self, examples):
+        # (1) 기본 마스킹: prompt 전체 = -100, response = token ids
+        batch = super().torch_call(examples)
+        input_ids = batch["input_ids"]
+        labels = batch["labels"]
+        seq_len = input_ids.size(1)
+        sub_len = len(self.stop_seq)
+        fuel = self.num_input_examples
+
+        for i in range(input_ids.size(0)):
+            # (2) 입력(input_ids[i])에서 stop_seq가 처음 나오는 인덱스 찾기
+            window = input_ids[i].tolist()
+            # naive sub-sequence search
+            start = -1
+            for j in range(seq_len - sub_len + 1):
+                if window[j:j+sub_len] == self.stop_seq:
+                    start = j + sub_len
+                    if fuel > 0:
+                        fuel -= 1
+                    else:
+                        break
+            # (3) 매칭 못하면 기본 동작 유지, 매칭되면 그 앞부분(0..start-1)은 여전히 -100,
+            #     start부터 prompt_end까지(즉 response가 시작되기 전까지)는 mask 해제
+            if start >= 0:
+                # prompt 영역 전체 인덱스는 labels == -100인 지점들로 확인
+                prompt_mask = labels[i] == -100
+                prompt_end = prompt_mask.nonzero().max().item() + 1
+                # start < prompt_end 구간만큼 unmask
+                if start < prompt_end:
+                    labels[i, start:prompt_end] = input_ids[i, start:prompt_end]
+        return batch
 
 class ARCSolver:
     """
@@ -75,87 +124,168 @@ class ARCSolver:
             prompt (dict): dictionary that contains input ids and additional informations
         """
 
+        format_ops = dict(
+            preprompt = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz',
+            query_bag = 'I',
+            reply_beg = '\n+=*/=O',
+            reply_end = '\n' + self.tokenizer.eos_token,
+            lines_sep = '\n',
+            max_tokens = 128000,
+        )
+
         training_data = datapoint['train']
         input_test_data = datapoint['test'][0]['input']
 
-        sys = self.tokenizer.encode("<|begin_of_text|><|start_header_id|>system<|end_header_id|>" + "\n" + system_prompt, add_special_tokens=False)
-        user = self.tokenizer.encode("<|start_header_id|>user<|end_header_id|>" + "\n" + user_message_template1 + "\n", add_special_tokens=False)
-        inp_desc = self.tokenizer.encode("input:\n", add_special_tokens=False)
-        out_desc = self.tokenizer.encode("output:\n", add_special_tokens=False)
+        query_beg = self.tokenizer.encode(format_ops['query_bag'], add_special_tokens=False)
+        reply_beg = self.tokenizer.encode(format_ops['reply_beg'], add_special_tokens=False)
+        reply_end = self.tokenizer.encode(format_ops['reply_end'], add_special_tokens=False)
+
+        user = self.tokenizer.encode(format_ops['preprompt'], add_special_tokens=False)
         for ex in training_data:
             inp = ex['input']
             out = ex['output']
             inp = self.format_grid(inp)
             out = self.format_grid(out)
 
-            user += inp_desc
+            user += query_beg
             user += inp
-            user += out_desc
+            user += reply_beg
             user += out
+            user += reply_end
 
-        user += self.tokenizer.encode("\n" + user_message_template2 + "\n", add_special_tokens=False)
-
-        user += inp_desc
+        user += query_beg
         user += self.format_grid(input_test_data)
-        user += self.tokenizer.encode("\n" + user_message_template3, add_special_tokens=False)
+        user += reply_beg
 
-
-        messages = sys + user
-        assis = self.tokenizer.encode("<|eot_id|><|start_header_id|>assistant<|end_header_id|>", add_special_tokens=False)
+        messages = user
 
         if is_train:
             # attach labels to data
             output_test_data = datapoint['test'][0]['output']
             labels = self.format_grid(output_test_data)
-            assis += labels
-        messages += assis
-        
-        attention_mask = [1] * len(messages)
+            messages += labels + reply_end
 
         if is_train:
-            return {
-                "input_ids": messages,
-                "attention_mask": attention_mask,
-            }
+            return { "text": messages }
         else:
             return {
-                "input_ids": messages,
-                "attention_mask": attention_mask,
+                "text": messages,
 
                 # Required for post-processing the shape of LLM-generated grid
                 # Hence these fields are not used in training
                 "input": input_test_data,
                 "train": training_data,
             }
+        
+    def get_or_map_special_tokens(self, data, mapping=None):
+        tokens = set()
+        if isinstance(data, dict):
+            special = data.get('special_tokens')
+            if special is not None:  # find and/or update special token mappings
+                for v in special.values():
+                    tokens.update(v['ids'])
+                    if mapping is not None:
+                        v['ids'] = [mapping.get(i) for i in v['ids'] if i in mapping]
+            for v in data.values():  # recursively process dict values
+                tokens.update(self.get_or_map_special_tokens(v, mapping))
+        if isinstance(data, list):
+            for v in data:  # recursively process lists
+                tokens.update(self.set_or_map_special_tokens(v, mapping))
+        return tokens
+        
+    def remove_tokenizer_normalizer(self, tokenizer):
+        tokenizer_json = json.loads(tokenizer._tokenizer.to_str())
+        if tokenizer_json.get('normalizer') is not None:
+            tokenizer_json['normalizer'] = None
+            tokenizer._tokenizer = Tokenizer.from_str(json.dumps(tokenizer_json))
+
+    def shrink_tokenizer_vocab(self, tokenizer, keep_indices, keep_special=True, remove_unk=False):
+        tok_json = json.loads(tokenizer._tokenizer.to_str())
+        assert tok_json['model']['type'] == "BPE"
+
+        if keep_special:
+            keep_indices.update(tokenizer.all_special_ids)
+            keep_indices.update(self.get_or_map_special_tokens(tok_json.get('post_processor')))
+        
+        if remove_unk:
+            keep_indices -= {tokenizer.unk_token_id}
+
+        # old에서 new로 mapping
+        mapping = {old: new for new, old in enumerate(sorted(keep_indices))}
+
+        # update tokenizer info
+        tok_json['model']['vocab'] = {k: mapping[v] for k, v in tok_json['model']['vocab'].items() if v in mapping}
+        tok_json['model']['merges'] = []
+        tok_json['added_tokens'] = [{**t, 'id': mapping[t['id']]} for t in tok_json['added_tokens'] if t['id'] in mapping]
+        tok_json['added_tokens'] = sorted(tok_json['added_tokens'], key=lambda t: t['id'])
+        self.get_or_map_special_tokens(tok_json.get('post_processor'), mapping)
+
+        tokenizer._tokenizer = Tokenizer.from_str(json.dumps(tok_json))  # reload json, modifying tokenizer in-place
+
+        if remove_unk:
+            tokenizer.unk_token = None
+
+        return mapping  # token mapping to be used later
+    
+    def shrink_model_embeddings(self, mapping):
+        with torch.no_grad():
+            # copy embeddings to keep
+            row_select = torch.tensor([x[0] for x in sorted(mapping.items(), key=lambda x: x[1])])
+            row_select = row_select.to(self.model.get_input_embeddings().weight.data.device)
+            new_embed_t = torch.index_select(self.model.get_input_embeddings().weight.data, 0, row_select)
+            row_select = row_select.to(self.model.get_output_embeddings().weight.data.device)
+            new_lm_head = torch.index_select(self.model.get_output_embeddings().weight.data, 0, row_select)
+
+            # resize model embeddings
+            self.model.resize_token_embeddings(len(row_select))
+
+            # set to copied values
+            self.model.get_input_embeddings().weight.data[:] = new_embed_t
+            self.model.get_output_embeddings().weight.data[:] = new_lm_head
+
+            # map model tokens to new id
+            for config in [self.model.config, self.model.generation_config]:
+                for k, v in list(config.to_dict().items()):
+                    if k.endswith('token_id'):
+                        setattr(config, k, [mapping.get(t) for t in v] if isinstance(v, list) else mapping.get(v))
+
+    def keep_single_char_tokens(self, tokenizer, keep=None, keep_norm=False, keep_model_tok=True, **kwargs):
+        if not keep_norm:
+            self.remove_tokenizer_normalizer(tokenizer)  # required for some models
+        if keep is None:  # 모든 길이 1인 토큰을 유지
+            keep_indices = set(v for k, v in tokenizer.vocab.items() if len(k) == 1)
+        else:  # 주어진 토큰만 유지
+            keep_indices = set(tokenizer.vocab[t] for t in keep)
+        if keep_model_tok:  # 모델의 config에서 지정된 토큰을 유지
+            for config in [self.model.config, self.model.generation_config]:
+                for k, v in config.to_dict().items():
+                    if k.endswith('token_id'):
+                        keep_indices.update(v if isinstance(v, list) else [v])
+        keep_indices -= {None}
+        mapping = self.shrink_tokenizer_vocab(tokenizer, keep_indices, **kwargs)
+        self.shrink_model_embeddings(mapping)
+        return mapping
 
     def setup(self, args):
         print("*** Setup model and tokenizer with config ***")
-        
-        # Configure the BitsAndBytes settings for 4-bit quantization to reduce memory usage
-        bnb_config = BitsAndBytesConfig(
-            load_in_4bit=True,  # Enable 4-bit quantization
-            bnb_4bit_use_double_quant=True,  # Use double quantization for improved precision
-            bnb_4bit_quant_type="nf4",  # Specify the quantization type
-            bnb_4bit_compute_dtype=torch.float16,  # Set the computation data type
-        )
-        self.model = AutoModelForCausalLM.from_pretrained(
-            args.model_id,
-            trust_remote_code=True, # Allow the model to use custom code from the repository
-            quantization_config=bnb_config, # Apply the 4-bit quantization configuration
-            attn_implementation=args.attn_impl, # Use scaled-dot product attention for better performance
-            use_cache=args.use_cache, # Disable caching to save memory
-            device_map='auto', # Automatically map the model to available devices (e.g., GPUs)
-            token=self.token,
+
+        model = tokenizer = None
+        # Load the model and tokenizer using the specified model ID
+        model, tokenizer = FastLanguageModel.from_pretrained(
+            model_name=args.model_id,
+            dtype=None,
+            load_in_4bit=True,
         )
 
-        self.tokenizer = AutoTokenizer.from_pretrained(args.model_id, token=self.token)
-        if self.tokenizer.pad_token is None:
-            self.tokenizer.pad_token = self.tokenizer.eos_token
+        keep_tok = list("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789!?.,:;+-*/=")+tokenizer.tokenize('\n')
+        self.keep_single_char_tokens(tokenizer, keep=keep_tok, remove_unk=True)
+
+        self.model = model
+        self.tokenizer = tokenizer
 
         self.pixel_ids = [
             self.tokenizer.encode(str(i), add_special_tokens=False)[0] for i in range(10)
         ]
-        self.sep = self.tokenizer.encode("\n", add_special_tokens=False)[0]
 
 
     def train(self, train_dataset, val_dataset=None, args=None):
@@ -200,10 +330,10 @@ class ARCSolver:
 
         # Set data collator
         print('\n*** Set data collator ***')
-        data_collator = DataCollatorForCompletionOnlyLM(
-            tokenizer=self.tokenizer,
-            # instruction_template='<|start_header_id|>user<|end_header_id|>',
-            response_template='<|start_header_id|>assistant<|end_header_id|>',
+        data_collator = TrainingSetMaskingCollator(
+            num_input_examples=3,
+            stop_after='\n+=*/=O',
+            tokenizer=self.tokenizer
         )
 
         # Set training arguments

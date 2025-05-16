@@ -52,5 +52,6 @@ for fname in os.listdir(input_dir):
 
         # 여러 이미지가 한 폴더에 들어가도록 파일명에 인덱스 붙이기
         img.save(os.path.join(rule_dir, f"combined_{idx}.png"))
+        print(f"Rule {rule_name} - Image {idx} saved.")
 
 print("모든 rule 폴더 안에 다수의 combined_*.png 파일이 생성되었어.")
