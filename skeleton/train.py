@@ -21,7 +21,7 @@ class args_default:
     max_seq_len = 2048
 
     dataset_len = 2000
-    val_size = 0.02
+    val_size = 0.01
 
     epochs = 1
     warmup_ratio = 0.1
@@ -32,7 +32,7 @@ class args_default:
 
     do_eval = True
     eval_strategy = "steps"
-    eval_steps = 20
+    eval_steps = 100
     save_steps = 100
     logging_steps = 10
     log_level = "debug"

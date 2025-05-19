@@ -7,12 +7,10 @@ import numpy as np
 import yaml
 import re
 
-from .utils import system_prompt
-from transformers import BitsAndBytesConfig, AutoModelForCausalLM, AutoTokenizer, TrainingArguments, pipeline
-from trl import SFTConfig, SFTTrainer, DataCollatorForCompletionOnlyLM
-from peft import PeftModelForCausalLM
-from arc.model_tools import load_unsloth_4bit, keep_single_char_tokens, save_model_and_tokenizer
-from arc.model_tools import InputMaskingDataCollator
+from unsloth import FastLanguageModel
+from model_tools import load_unsloth_4bit
+from inference_tools import inference_run
+from selection import EvalTool
 
 class ARCSolver:
     """
@@ -60,34 +58,7 @@ class ARCSolver:
 
     def setup(self, args):
         print("*** Setup model and tokenizer with config ***")
-        
-        # Configure the BitsAndBytes settings for 4-bit quantization to reduce memory usage
-        bnb_config = BitsAndBytesConfig(
-            load_in_4bit=True,  # Enable 4-bit quantization
-            bnb_4bit_use_double_quant=True,  # Use double quantization for improved precision
-            bnb_4bit_quant_type="nf4",  # Specify the quantization type
-            bnb_4bit_compute_dtype=torch.float16,  # Set the computation data type
-        )
-        self.model = AutoModelForCausalLM.from_pretrained(
-            args.model_id,
-            trust_remote_code=True, # Allow the model to use custom code from the repository
-            quantization_config=bnb_config, # Apply the 4-bit quantization configuration
-            attn_implementation=args.attn_impl, # Use scaled-dot product attention for better performance
-            use_cache=args.use_cache, # Disable caching to save memory
-            device_map='auto', # Automatically map the model to available devices (e.g., GPUs)
-            token=self.token,
-        )
-
-        self.tokenizer = AutoTokenizer.from_pretrained(args.model_id, token=self.token)
-        if self.tokenizer.pad_token is None:
-            self.tokenizer.pad_token = self.tokenizer.eos_token
-        keep_tok = list('ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789!?.:,;*+/-=')+tokenizer.tokenize('\n')
-        keep_single_char_tokens(model, tokenizer, keep=keep_tok, remove_unk=True)
-
-        self.pixel_ids = [
-            self.tokenizer.encode(str(i), add_special_tokens=False)[0] for i in range(10)
-        ]
-        self.sep = self.tokenizer.encode("\n", add_special_tokens=False)[0]
+        self.model, self.tokenizer = load_unsloth_4bit(args.model_id, token=self.token)
         self.fmt_opts = dict(
             preprompt='ABCDEFGHJKLMNPQRSTUVWXYZabcdefghjklmnpqrstuvwxyz',
             query_beg='I',
@@ -97,101 +68,11 @@ class ARCSolver:
             max_tokens=128000,
         )
 
-
-
     def train(self, train_dataset, val_dataset=None, args=None):
         """
-        Train a model with train_dataset.
-        Args:
-            train_dataset (Dataset): training dataset
-            val_dataset (Dataset): validation dataset
-            args (Class): configuration for training
-        
-        Below code is imported from
-        https://github.com/ironbar/arc24/blob/main/notebooks/003_llm_fine-tuning_on_arc_tasks.ipynb
+        Refer to `run_finetuning_...-arc.py` for training code.
         """
-
-        # Setup model and tokenizer with config
-        self.setup(args)
-        self.model.gradient_checkpointing_enable()
-        self.model.enable_input_require_grads()
-
-        # Load LoRA Adapter
-        peft_config = None
-        if args.load_adapter:
-            print(f'\n*** Loading adapter from {args.adapter_path} ***')
-            self.model = prepare_model_for_kbit_training(self.model)
-            self.model = PeftModelForCausalLM.from_pretrained(
-                self.model,
-                args.adapter_path,
-                device_map="auto",
-                is_trainable=True,
-            )
-        else:
-            peft_config = LoraConfig(
-                r=args.lora_r,
-                lora_alpha=args.lora_alpha,
-                target_modules=args.lora_target_modules,
-                lora_dropout=args.lora_dropout,
-                bias=args.lora_bias,
-                task_type=args.lora_task_type,
-            )
-            self.model = prepare_model_for_kbit_training(self.model)
-
-        # Set data collator
-        print('\n*** Set data collator ***')
-        data_collator = InputMaskingDataCollator(
-                instruction_template=self.fmt_opts['query_beg'],
-                response_template=self.fmt_opts['reply_beg'],
-                mlm=False,
-                tokenizer=self.tokenizer,
-                mask_first_n_examples=1,
-        )
-
-        # Set training arguments
-        print('\n*** Set training arguments ***')
-        batch_size_kwargs = dict(
-            per_device_train_batch_size=args.train_batch_size,  # 4-16 should be fine for lora.
-            gradient_accumulation_steps=args.grad_acc_steps,
-            per_device_eval_batch_size=args.eval_batch_size,
-        )
-
-        training_arguments = SFTConfig(
-            output_dir=args.output_dir,
-            num_train_epochs=args.epochs,
-            # max_steps=args.max_steps,
-            warmup_ratio=args.warmup_ratio,
-            learning_rate=args.learning_rate,
-            lr_scheduler_type=args.lr_scheduler,
-            optim=args.optim,
-            weight_decay=args.weight_decay, 
-
-            do_eval=args.do_eval,
-            eval_strategy=args.eval_strategy,
-            eval_steps=args.eval_steps,
-            save_steps=args.eval_steps,
-            logging_steps=args.logging_steps,
-            log_level=args.log_level,
-
-            max_seq_length=args.max_seq_len,
-            label_names=["labels"],
-            report_to="wandb" if args.wandb else "none",
-
-            **batch_size_kwargs
-        )
-
-        # Train the model with SFTTrainer
-        print('\n*** Train the model with SFTTrainer ***')
-        trainer = SFTTrainer(
-            model=self.model,
-            train_dataset=train_dataset,
-            eval_dataset=val_dataset,
-            peft_config=peft_config,
-            data_collator=data_collator,
-            args=training_arguments,
-        )
-
-        trainer.train()
+        pass
 
     def predict(self, examples, questions_input):
         """
@@ -227,6 +108,8 @@ class ARCSolver:
             ]
         }
 
+        # TODO: Implement the predict function
+
         prompt = self.format_prompt(datapoint)
         input_ids = torch.tensor(prompt['input_ids'], dtype=torch.long).to(self.device).view(1, -1)
 
@@ -245,7 +128,7 @@ class ARCSolver:
         output = output[N_prompt:].tolist()
         test_input = np.array(prompt['input'])
 
-                # 1. 토큰 리스트 디코딩
+        # 1. 토큰 리스트 디코딩
         decoded_text = self.tokenizer.decode(output[:10], skip_special_tokens=True)
 
         # 2. 숫자 추출
@@ -285,8 +168,7 @@ class ARCSolver:
         # Setup model and tokenizer with config
         self.setup(args)
 
-        self.model.load_adapter(args.output_dir)
-        self.model.eval()
+        FastLanguageModel.for_inference(self.model)
 
 
 if __name__ == "__main__":

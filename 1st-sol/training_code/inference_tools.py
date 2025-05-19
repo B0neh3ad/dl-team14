@@ -199,6 +199,8 @@ def infer_task(keys, dataset, fmt_opts, aug_score_opts=None, pass_guess=True, pr
 
     return list(unique_results.values())
 
+def infer_task_dl(keys, dataset, fmt_opts, pass_guess=True, print_func=print, **kwargs):
+    pass
 
 def inference_run(dataset, fmt_opts, max_new_tokens=None, callback=None, **kwargs):
     # set token limits

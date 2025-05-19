@@ -23,6 +23,8 @@ from inference_tools import inference_run
 from selection import EvalTool
 from arc_downloader import download_arc_data
 
+hf_token = "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"
+
 # input paths
 base_model = 'Llama-3.2-3B-Instruct-merged'
 arc_data_path = os.path.join('input', 'arc-prize-2024')  # as on kaggle arc prize 2024
@@ -35,13 +37,13 @@ inference_cache = os.path.join(output_path, 'inference_cache')
 submission_file = os.path.join(output_path, 'submission.json')
 
 # load evaluation dataset
-arc_eval_set = ArcDataset.load_from_json_dl('../../../../dataset', n=1, sizes=[3], seed=42, shuffle=False)
+arc_eval_set = ArcDataset.load_from_json_dl('/../../dataset', n=1, sizes=[3], seed=42, shuffle=False)
 print(arc_eval_set.challenge['arc-007bbfb700_0']['train'])
 print(arc_eval_set.challenge['arc-007bbfb700_0']['test'])
 print(arc_eval_set.solutions['arc-007bbfb700_0'])
 
 # load model
-model, tokenizer = load_unsloth_4bit(save_model_path)
+model, tokenizer = load_unsloth_4bit(save_model_path, token=hf_token)
 
 # set formatting options
 fmt_opts = dict(
