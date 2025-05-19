@@ -329,7 +329,7 @@ class ARCSolver:
         try:
             print(f"output: {output}")
             grid = np.array(self.parse_grid(output))
-            # grid = grid[:x, :y]
+            grid = grid[:x, :y]
             
         except Exception as e:
             grid = np.random.randint(0, 10, (x, y))
@@ -342,7 +342,7 @@ class ARCSolver:
         """
         # Load config yaml file
         # NOTE: You should locate config file in this path!
-        config_path = "artifacts/config/config-qwen.yaml"
+        config_path = "artifacts/config/config-llama-3B-b0neh3ad.yaml"
         with open(config_path, "r") as f:
             config_dict = yaml.safe_load(f)
         

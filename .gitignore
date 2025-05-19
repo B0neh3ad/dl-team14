@@ -192,4 +192,6 @@ config
 unsloth_compiled_cache
 wandb/
 
+input
+
 # End of https://www.toptal.com/developers/gitignore/api/python,dotenv
