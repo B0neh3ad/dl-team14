@@ -227,7 +227,10 @@ class ARCSolver:
             ]
         }
 
-        prompt = self.format_prompt(datapoint)
+        from arc.dataloader import ArcDataLoader
+        prompt = ArcDataLoader.format_predict(datapoint, self.fmt_opts)
+
+#       prompt = self.format_prompt(datapoint)
         input_ids = torch.tensor(prompt['input_ids'], dtype=torch.long).to(self.device).view(1, -1)
 
         config = GenerationConfig(

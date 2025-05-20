@@ -86,6 +86,7 @@ class ArcDataLoader:
         print("make_data", dataset[0]);
         return self.data_format(dataset, fmt_opts, is_train) # 이거 끝나면 "rule" : "data" 들의 list생성
     
+    @staticmethod
     def format_predict(self, datapoint, fmt_opts):
         predict_input = "" + fmt_opts["preprompt"]
         for example in datapoint["train"]:
@@ -98,7 +99,14 @@ class ArcDataLoader:
         predict_input += self.format_grid(datapoint["test"]["input"])
         predict_input += fmt_opts["reply_beg"]
 
-        return 
+        input_ids = self.tokenizer.encode(predict_input)
+        attention_mask = [1] * len(input_ids)
+        return {
+            "input_ids": input_ids,
+            "attention_maks": attention_mask,
+            "input" : datapoint["test"][0]["input"],
+            "train": datapoint["train"]
+        }
     
 
 
