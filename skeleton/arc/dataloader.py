@@ -37,7 +37,7 @@ class ArcDataLoader:
     def data_format(self, dataset, fmt_opts, is_train): # 이제 dataset에 있는 각데이터들 LLM에 인풋으로 넣을 수 있게 바꾸는게 목표
 
         datasets = []
-        debug = True
+        debug = False
         
         for item in dataset:
             message = fmt_opts["preprompt"]
@@ -79,16 +79,37 @@ class ArcDataLoader:
                     break
                 group = items[j: j + size]
                 dataset.append({"rule": rule_name, "data": group})
+        print("make_data", dataset[0]);
         return self.data_format(dataset, fmt_opts, is_train) # 이거 끝나면 "rule" : "data" 들의 list생성
-
-                         
+    
+    @classmethod
+    def format_predict(self, datapoint, fmt_opts):
+        predict_input = "" + fmt_opts["preprompt"]
+        for example in datapoint["train"]:
+            predict_input += fmt_opts["query_beg"]
+            predict_input += self.format_grid(example["input"])
+            predict_input += fmt_opts["reply_beg"]
+            predict_input += self.format_grid(example["output"])
+            predict_input += fmt_opts["reply_end"]
+        predict_input += fmt_opts["query_beg"]
+        predict_input += self.format_grid(datapoint["test"]["input"])
+        predict_input += fmt_opts["reply_beg"]
+    
 
 
 
 
 def __main__():
     train_dataset = ArcDataLoader.load_from_json("../../dataset")
-    dataset = train_dataset.make_dataset(4, 2, False)
+    fmt_opts = dict(
+            preprompt='ABCDEFGHJKLMNPQRSTUVWXYZabcdefghjklmnpqrstuvwxyz',
+            query_beg='I',
+            reply_beg='\n+/-=O',
+            reply_end='\n',
+            lines_sep='\n',
+            max_tokens=128000,
+        )
+    dataset = train_dataset.make_dataset(4, fmt_opts, False)
     print(dataset[0])
 
 if __name__ == "__main__":

@@ -82,7 +82,7 @@ class ARCSolver:
         if self.tokenizer.pad_token is None:
             self.tokenizer.pad_token = self.tokenizer.eos_token
         keep_tok = list('ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789!?.:,;*+/-=')+tokenizer.tokenize('\n')
-        keep_single_char_tokens(model, tokenizer, keep=keep_tok, remove_unk=True)
+        keep_single_char_tokens(self.model, self.tokenizer, keep=keep_tok, remove_unk=True)
 
         self.pixel_ids = [
             self.tokenizer.encode(str(i), add_special_tokens=False)[0] for i in range(10)
