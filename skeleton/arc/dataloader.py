@@ -3,7 +3,7 @@ import json
 import numpy as np
 
 class ArcDataLoader:
-    def __init__(self, challenge):
+    def __init__(self, challenge, tokenizer):
         self.keys = []
         for rule_name, items in challenge.items():           # e.g. rule_name="rule1", items=[{…},{…},…]
             for idx, io_dict in enumerate(items):            # idx=0,1,…
@@ -14,7 +14,9 @@ class ArcDataLoader:
                     self.keys.append(f"{rule_name}_{idx}_output")
 
         self.keys.sort()
-        self.challenge = challenge # 여기에 [rule name][number][input or output] 이런식으로 이제 다 저장이 되어있음
+        self.challenge = challenge
+        self.tokenizer = tokenizer
+         # 여기에 [rule name][number][input or output] 이런식으로 이제 다 저장이 되어있음
 
     @classmethod
     def load_from_json(cls, path):
@@ -54,6 +56,8 @@ class ArcDataLoader:
                 print(item)
                 print(message)
                 debug = False
+            
+            message = self.tokenizer.encode(message)
             attention_mask = [1] * len(message)
             if is_train:
                 datasets.append({"input_ids": message,
@@ -82,7 +86,6 @@ class ArcDataLoader:
         print("make_data", dataset[0]);
         return self.data_format(dataset, fmt_opts, is_train) # 이거 끝나면 "rule" : "data" 들의 list생성
     
-    @classmethod
     def format_predict(self, datapoint, fmt_opts):
         predict_input = "" + fmt_opts["preprompt"]
         for example in datapoint["train"]:
@@ -94,6 +97,8 @@ class ArcDataLoader:
         predict_input += fmt_opts["query_beg"]
         predict_input += self.format_grid(datapoint["test"]["input"])
         predict_input += fmt_opts["reply_beg"]
+
+        return 
     
 
 
