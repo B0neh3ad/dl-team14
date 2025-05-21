@@ -194,7 +194,7 @@ wandb/
 
 input
 
-/training_code/finetuned_models/
+1st-sol/training_code/finetuned_models/
 
 
 # End of https://www.toptal.com/developers/gitignore/api/python,dotenv
