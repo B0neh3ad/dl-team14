@@ -128,9 +128,20 @@ class ARCSolver:
             cache=self.model_cache,
         )
 
+        best_output = None
+        best_score  = float('-inf')
+
+        for aug_idx, guesses in enumerate(inference_results[base]):
+    # n_guesses=1 이면 guesses 리스트에 단 하나만 들어있어
+            guess = guesses[0]
+            score = guess['scores_alg'][self.eval_tool.sorting_algo]  # 정렬에 쓰는 스코어 인덱스
+            if score > best_score:
+                best_score  = score
+                best_output = guess['output']
 
 
-        return inference_results[base][0][0]['output']
+
+        return best_output
 
     def prepare_evaluation(self):
         """

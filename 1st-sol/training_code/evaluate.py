@@ -84,7 +84,6 @@ def main():
             eval_data["train"],
             eval_data["test"][0]["input"],
         )
-        print(preds)
         s = check_match(preds, eval_data["test"][0]["output"])
         scores.append(s)
     
