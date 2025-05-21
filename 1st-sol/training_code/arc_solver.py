@@ -1,4 +1,5 @@
 import argparse
+import os
 from peft import LoraConfig, PeftModel, prepare_model_for_kbit_training
 from transformers import GenerationConfig
 import torch
@@ -6,8 +7,10 @@ from typing import List
 import numpy as np
 import yaml
 import re
+from diskcache import Cache
 
 from unsloth import FastLanguageModel
+from arc_loader import ArcDataset
 from model_tools import load_unsloth_4bit
 from inference_tools import inference_run
 from selection import EvalTool
@@ -56,9 +59,9 @@ class ARCSolver:
                 row.append(inv_map.get(idx, 0))
         return grid
 
-    def setup(self, args):
+    def setup(self, base_model):
         print("*** Setup model and tokenizer with config ***")
-        self.model, self.tokenizer = load_unsloth_4bit(args.model_id, token=self.token)
+        self.model, self.tokenizer = load_unsloth_4bit(base_model, token=self.token)
         self.fmt_opts = dict(
             preprompt='ABCDEFGHJKLMNPQRSTUVWXYZabcdefghjklmnpqrstuvwxyz',
             query_beg='I',
@@ -110,46 +113,10 @@ class ARCSolver:
 
         # TODO: Implement the predict function
 
-        prompt = self.format_prompt(datapoint)
-        input_ids = torch.tensor(prompt['input_ids'], dtype=torch.long).to(self.device).view(1, -1)
-
-        config = GenerationConfig(
-            do_sample=False,
-            pad_token_id=self.tokenizer.eos_token_id,
-            max_new_tokens=150,
-        )
-
-        output = self.model.generate(
-            input_ids=input_ids,
-            generation_config=config,
-        ).squeeze().cpu()
-        N_prompt = input_ids.numel()
-
-        output = output[N_prompt:].tolist()
-        test_input = np.array(prompt['input'])
-
-        # 1. 토큰 리스트 디코딩
-        decoded_text = self.tokenizer.decode(output[:10], skip_special_tokens=True)
-
-        # 2. 숫자 추출
-        pattern = r'\((\d+\.?\d*),\s*(\d+\.?\d*)\)'
-        match = re.search(pattern, decoded_text)
-
-        if match:
-            width_str, height_str = match.groups()
-            width = int(width_str)
-            height = int(height_str)
-
-        else:
-            width, height = test_input.shape  # 패턴 미발견 시 처리
-        
-
-        try:
-            grid = np.array(self.parse_grid(output))
-            grid = grid[:width, :height]
-            
-        except Exception as e:
-            grid = np.random.randint(0, 10, (width, height))
+        # 1. foramt datapoint and augment
+        # 2. perform inference for augmented datapoint
+        # 3. 
+        grid = []
 
         return grid
 
@@ -157,18 +124,19 @@ class ARCSolver:
         """
         Load pretrained weight, make model eval mode, etc.
         """
-        # Load config yaml file
-        # NOTE: You should locate config file in this path!
-        config_path = "artifacts/config/config.yaml"
-        with open(config_path, "r") as f:
-            config_dict = yaml.safe_load(f)
-        
-        args = argparse.Namespace(**config_dict)
+        base_model = 'Qwen2.5-3B-Instruct-merged'
+
+        output_path = 'output_evaluation_Llama-arc_without_ttt'
+        save_model_path = os.path.join('finetuned_models', base_model)
+        inference_cache = os.path.join(output_path, 'inference_cache')
 
         # Setup model and tokenizer with config
-        self.setup(args)
+        self.setup(base_model)
 
         FastLanguageModel.for_inference(self.model)
+        self.infer_aug_opts = dict(tp='all', rt='all', perm=True, shfl_ex=True, seed=10000)
+        self.model_cache = Cache(inference_cache).memoize(typed=True, ignore=set(['model_tok', 'guess']))
+        self.eval_tool = EvalTool(n_guesses=1)
 
 
 if __name__ == "__main__":

@@ -46,6 +46,7 @@ def load_unsloth_4bit(model_path, token=None):
         dtype=None,
         load_in_4bit=True,
         token=token,
+        use_exact_model_name=True,
     )
 
 

@@ -216,8 +216,8 @@ def inference_run(dataset, fmt_opts, max_new_tokens=None, callback=None, **kwarg
             results[base_key] = []
             for task_num, task in enumerate(tasks):
                 res = infer_task(keys=task, dataset=dataset, fmt_opts=fmt_opts, max_new_tokens=max_new_tokens,
-                                 print_func=pbar.write, **kwargs)
+                                 print_func=print, **kwargs)
                 results[base_key].append(res)
                 if callback is not None:
-                    callback(res, name=f'{base_key}_{task_num}', value=1/len(tasks), print_func=pbar.write)
+                    callback(res, name=f'{base_key}_{task_num}', value=1/len(tasks), print_func=print)
     return results

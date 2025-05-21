@@ -51,9 +51,9 @@ class ArcDataset(object):
         )
 
     @classmethod
-    def load_from_json_dl(cls, path, size=6, seed=42, shuffle=True):  # loader for arc
+    def load_from_json_dl(cls, path, size=6, seed=42, shuffle=True, eval=False):  # loader for arc
         np.random.seed(seed)
-        keys = [[] for _ in range(1000 // (1 + size))]
+        keys = [[] for _ in range(1000 // (1 + size) if not eval else 1)]
         challenge = {}
         solutions = {}
 
@@ -65,8 +65,9 @@ class ArcDataset(object):
             with open(os.path.join(path, f'{key}.json')) as f:
                 tasks = np.random.permutation(json.load(f)).tolist()
 
-            n = len(tasks) // (1 + size)
-            n = n // 2 # half the dataset for checking performance
+            n = len(tasks) // (1 + size) if not eval else 1
+            # if n > 1:
+            #     n = n // 2 # half the dataset for checking performance
             for epoch in range(n):
                 next_size_with_test = 1 + size
                 base_key = f'arc-{key}{epoch:02x}'
