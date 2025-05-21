@@ -1,4 +1,4 @@
-from arctypes import *
+from .arctypes import *
 
 
 def identity(

@@ -392,6 +392,32 @@ class ARCSolver:
 
         trainer_stats = unsloth_train(trainer)
 
+    def find_algorithm(self, train_input, train_output):
+        import importlib, inspect
+        tasksolver = importlib.import_module('tasksolver')
+
+        train_input = tuple(tuple(line) for line in train_input)
+        train_output = tuple(tuple(line) for line in train_output)
+        all_functions = []
+        for name, func in inspect.getmembers(tasksolver, inspect.isfunction):
+            if name.startswith('solve_'):
+                all_functions.append(func)
+
+        # 각 함수에 train_input을 적용하고 결과 확인
+        for func in all_functions:
+            try:
+                result = func(train_input)
+
+                # 결과가 train_output과 일치하는지 확인
+                if result == train_output:
+                    return func
+            except Exception as e:
+                # 에러가 발생할 경우 해당 함수는 건너뜀
+                print(f"함수 {func.__name__}에서 에러 발생: {e}")
+        
+        # 일치하는 함수가 없는 경우
+        return None
+
     def predict(self, examples, questions_input):
         """
         A single example of test data is given.
@@ -429,6 +455,16 @@ class ARCSolver:
         prompt = self.format_prompt(datapoint)
         input_ids = torch.tensor(prompt['input_ids'], dtype=torch.long).to(self.device).view(1, -1)
 
+        train_input = np.array(prompt['train'][0]['input'])
+        train_output = np.array(prompt['train'][0]['output'])
+        test_input = np.array(prompt['input'])
+
+        algorithm = self.find_algorithm(train_input, train_output)
+        if algorithm is not None:
+            # If the algorithm is found, use it to generate the output
+            grid = algorithm(test_input)
+            return grid
+
         config = GenerationConfig(
             do_sample=False,
             pad_token_id=self.tokenizer.eos_token_id,
@@ -442,9 +478,6 @@ class ARCSolver:
         N_prompt = input_ids.numel()
 
         output = output[N_prompt:].tolist()
-        train_input = np.array(prompt['train'][0]['input'])
-        train_output = np.array(prompt['train'][0]['output'])
-        test_input = np.array(prompt['input'])
 
         # LLM-generated grid may have wrong shape
         # So adjust shape by input-output pairs
