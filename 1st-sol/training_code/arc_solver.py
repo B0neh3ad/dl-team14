@@ -61,7 +61,7 @@ class ARCSolver:
 
     def setup(self, base_model):
         print("*** Setup model and tokenizer with config ***")
-        self.model, self.tokenizer = load_unsloth_4bit(base_model, token=self.token)
+        self.model, self.tokenizer = load_unsloth_4bit(base_model)
         self.fmt_opts = dict(
             preprompt='ABCDEFGHJKLMNPQRSTUVWXYZabcdefghjklmnpqrstuvwxyz',
             query_beg='I',
@@ -126,7 +126,7 @@ class ARCSolver:
             aug_score_opts=self.infer_aug_opts,
             callback=self.eval_tool.process_result,
             cache=self.model_cache,
-)
+        )
 
 
 
@@ -143,7 +143,7 @@ class ARCSolver:
         inference_cache = os.path.join(output_path, 'inference_cache')
 
         # Setup model and tokenizer with config
-        self.setup(base_model)
+        self.setup(save_model_path)
 
         FastLanguageModel.for_inference(self.model)
         self.infer_aug_opts = dict(tp='all', rt='all', perm=True, shfl_ex=True, seed=10000)
