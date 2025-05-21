@@ -77,6 +77,34 @@ class ARCSolver:
         """
         pass
 
+    def find_algorithm(self, train_input, train_output):
+        # TODO: import 로직 제대로 돌아가는지 확인
+        import importlib, inspect
+        tasksolver = importlib.import_module('.dsl_solver', package='.training_code')
+
+        train_input = tuple(tuple(line) for line in train_input)
+        train_output = tuple(tuple(line) for line in train_output)
+        all_functions = []
+        for name, func in inspect.getmembers(tasksolver, inspect.isfunction):
+            if name.startswith('solve_'):
+                all_functions.append(func)
+
+        # apply each functions to train_input and check result
+        for func in all_functions:
+            try:
+                result = func(train_input)
+
+                # see if result is equal to train_output
+                if result == train_output:
+                    return func
+            except Exception as e:
+                # skip if error
+                # print(f"error: at {func.__name__}: {e}")
+                pass
+        
+        # if no function is found, return None
+        return None
+
     def predict(self, examples, questions_input):
         """
         A single example of test data is given.
@@ -102,6 +130,20 @@ class ARCSolver:
             output (List[List[int]]): A 2d grid,
                 which is the output of given input question.
         """
+        # Apply the algorithm if possible
+        train_input = examples[0]['input']
+        train_output = examples[0]['output']
+
+        algorithm = self.find_algorithm(train_input, train_output)
+        if algorithm is not None:
+            # If the algorithm is found, use it to generate the output
+            test_input = tuple(tuple(line) for line in questions_input)
+            try:
+                output = algorithm(test_input)
+                return np.array(output)
+            except Exception as e:
+                pass
+
         base = 'mem'
         challenge = {
             base: {
@@ -113,11 +155,11 @@ class ARCSolver:
         ds = ArcDataset(challenge=challenge, keys=keys, is_orig=True)
         ds = ds.repeat(1, seed=42)
         ds = ds.augment(seed=42,
-                    tp='all',     # transpose all
-                    rt='all',     # rotate all
-                    perm=True,    # permute pixels
-                    shfl_ex=True) # train example 순서 shuffle
-        
+                        tp='all',     # transpose all
+                        rt='all',     # rotate all
+                        perm=True,    # permute pixels
+                        shfl_ex=True) # shuffle order of train examples
+
         inference_results = inference_run(
             model_tok=(self.model, self.tokenizer),
             fmt_opts=self.fmt_opts,
@@ -132,9 +174,9 @@ class ARCSolver:
         best_score  = float('-inf')
 
         for aug_idx, guesses in enumerate(inference_results[base]):
-    # n_guesses=1 이면 guesses 리스트에 단 하나만 들어있어
+            # only one element is in the guesses list if n_guesses=1
             guess = guesses[0]
-            score = guess['scores_alg'][self.eval_tool.sorting_algo]  # 정렬에 쓰는 스코어 인덱스
+            score = guess['scores_alg'][self.eval_tool.sorting_algo]  # score index for sorting
             if score > best_score:
                 best_score  = score
                 best_output = guess['output']
