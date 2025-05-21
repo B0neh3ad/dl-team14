@@ -56,10 +56,11 @@ fmt_opts = dict(
 # run inference
 FastLanguageModel.for_inference(model)
 infer_aug_opts = dict(tp='all', rt='all', perm=True, shfl_ex=True, seed=10000)
-infer_dataset = arc_eval_set.repeat(2).augment(**infer_aug_opts)
+print("arc_eval_set",dir(arc_eval_set))
+infer_dataset = arc_eval_set.repeat(1).augment(**infer_aug_opts)
 model_cache = Cache(inference_cache).memoize(typed=True, ignore=set(['model_tok', 'guess']))
 eval_tool = EvalTool(n_guesses=2)
-inference_results = inference_run(
+'''inference_results = inference_run(
     model_tok=(model, tokenizer),
     fmt_opts=fmt_opts,
     dataset=infer_dataset,
@@ -73,4 +74,4 @@ inference_results = inference_run(
 with open(submission_file, 'w') as f:
     json.dump(arc_eval_set.get_submission(inference_results), f)
 with open(submission_file, 'r') as f:
-    print(f"Score for '{submission_file}':", arc_eval_set.validate_submission(json.load(f)))
+    print(f"Score for '{submission_file}':", arc_eval_set.validate_submission(json.load(f)))'''

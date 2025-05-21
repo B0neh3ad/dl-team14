@@ -102,23 +102,35 @@ class ARCSolver:
             output (List[List[int]]): A 2d grid,
                 which is the output of given input question.
         """
-        datapoint = {
-            "train": examples,
-            "test": [
-                {
-                    "input": questions_input
-                }
-            ]
+        base = 'mem'
+        challenge = {
+            base: {
+                'train': examples,                # List[dict]
+                'test' : [{'input': questions_input}]
+            }
         }
+        keys = [f'{base}_0']
+        ds = ArcDataset(challenge=challenge, keys=keys, is_orig=True)
+        ds = ds.repeat(1, seed=42)
+        ds = ds.augment(seed=42,
+                    tp='all',     # transpose all
+                    rt='all',     # rotate all
+                    perm=True,    # permute pixels
+                    shfl_ex=True) # train example 순서 shuffle
+        
+        inference_results = inference_run(
+            model_tok=(self.model, self.tokenizer),
+            fmt_opts=self.fmt_opts,
+            dataset=ds,
+            min_prob=0.1,
+            aug_score_opts=self.infer_aug_opts,
+            callback=self.eval_tool.process_result,
+            cache=self.model_cache,
+)
 
-        # TODO: Implement the predict function
 
-        # 1. foramt datapoint and augment
-        # 2. perform inference for augmented datapoint
-        # 3. 
-        grid = []
 
-        return grid
+        return inference_results[base][0][0]['output']
 
     def prepare_evaluation(self):
         """
