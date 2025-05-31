@@ -33,8 +33,9 @@ def load_data(base_dir):
 
     N = len(dataset)
 
-    while len(data) < MAX_LEN:
-        task_idx = rng.integers(0, N)
+    # while len(data) < MAX_LEN:
+    #     task_idx = rng.integers(0, N)
+    for task_idx in range(N):
         task = dataset[task_idx]
         file_name = filenames[task_idx]
 
@@ -78,7 +79,13 @@ def main():
     df = load_data(data_path)
 
     from datasets import Dataset
-    eval_dataset = Dataset.from_pandas(df).shuffle(42).select(range(N_data))
+    """
+    틀린 data index (seed=42 기준)
+    48, 59, 66, 71, 76, 79, 82, 93, 100, 125,
+    132, 138, 145, 148, 150, 164, 165, 182, 200, 212,
+    223, 239, 243, 250, 252, 253, 258, 263, 276,
+    """
+    eval_dataset = Dataset.from_pandas(df).shuffle(42).select([76,79,82,93,100,125,132,138,145,148,150,164,165,182,200,212,223,239,243,250,252,253,258,263,276])
     for idx, eval_data in enumerate(tqdm(eval_dataset)):
         preds = solver.predict(
             eval_data["train"],

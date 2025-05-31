@@ -195,7 +195,8 @@ wandb/
 input
 
 1st-sol/training_code/finetuned_models/
-1st-sol/submit/
+1st-sol/submit/artifacts/
 
+Qwen2.5-3B-*/
 
 # End of https://www.toptal.com/developers/gitignore/api/python,dotenv
