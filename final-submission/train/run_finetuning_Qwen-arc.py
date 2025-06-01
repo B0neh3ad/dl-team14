@@ -22,7 +22,6 @@ from arc_loader import ArcDataset
 from model_tools import InputMaskingDataCollator
 from model_tools import load_unsloth_4bit, keep_single_char_tokens, save_model_and_tokenizer
 from model_tools import load_peft_state, merge_peft_into_base
-from arc_downloader import download_arc_data
 
 import wandb
 

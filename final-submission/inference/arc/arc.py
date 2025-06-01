@@ -257,21 +257,6 @@ class ARCSolver:
             output (List[List[int]]): A 2d grid,
                 which is the output of given input question.
         """
-        # # Apply the algorithm if possible
-        # train_inputs = [examples[i]['input'] for i in range(len(examples))]
-        # train_outputs = [examples[i]['output'] for i in range(len(examples))]
-
-        # algorithm = self.find_algorithm(train_inputs, train_outputs)
-        # if algorithm is not None:
-        #     # If the algorithm is found, use it to generate the output
-        #     test_input = tuple(tuple(line) for line in questions_input)
-        #     try:
-        #         # TODO: 3개 다 체크해야 되는 것도 있고 1개만 통과해도 되는데 3개 검사하면 틀려서 넘어가는 것도 있음 -> 유연(트리플에스 김유연)하게 조절하기
-        #         output = algorithm(test_input)
-        #         return np.array(output)
-        #     except Exception as e:
-        #         pass
-
         base = 'mem'
         challenge = {
             base: {
