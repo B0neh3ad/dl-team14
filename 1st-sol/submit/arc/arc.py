@@ -147,11 +147,11 @@ class ARCSolver:
             if(best_score != float('-inf')):
                 return best_output
     
-        
-        for i in range(5):
+        min_probs = [0.7, 0.5, 0.3, 0.1]
+        for i in range(4):
             print(f"{i+1}th infer")
             self.infer_aug_opts["seed"] = self.our_lucky_seed[i]
-            best_score, best_output = self.infer(base, ds.augment(**self.infer_aug_opts), min_prob=0.5)
+            best_score, best_output = self.infer(base, ds.augment(**self.infer_aug_opts), min_prob=min_probs[i])
             if(best_score != float('-inf')):
                 return best_output
 
