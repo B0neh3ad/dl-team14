@@ -22,17 +22,17 @@ from arc_loader import ArcDataset
 from model_tools import InputMaskingDataCollator
 from model_tools import load_unsloth_4bit, keep_single_char_tokens, save_model_and_tokenizer
 from model_tools import load_peft_state, merge_peft_into_base
-from arc_downloader import download_arc_data
+
+import wandb
+
+hf_token = "" # replace with your Hugging Face token if needed
 
 # input paths
-base_model = 'nvidia/Mistral-NeMo-Minitron-8B-Base'  # auto-downloaded from huggingface.co
-arc_data_path = os.path.join('input', 'arc-prize-2024')  # as on kaggle arc prize 2024
-download_arc_data(arc_data_path)
-re_arc_path = os.path.join('input', 're_arc')  # https://github.com/michaelhodel/re-arc
-neoneye_path = os.path.join('input', 'arc-dataset-collection')  # https://github.com/neoneye/arc-dataset-collection
+base_model = 'Qwen/Qwen2.5-3B-Instruct'  # auto-downloaded from huggingface.co-
+arc_data_path = "../../../dataset"  # path to the dataset folder
 
 # output paths
-save_model_path = os.path.join('pretrained_models', "Mistral-NeMo-Minitron-Full")
+save_model_path = os.path.join('finetuned_models', "Qwen2.5-3B-Instruct")
 
 for action in ['train', 'merge']:
     # continue if task already accomplished
@@ -42,12 +42,15 @@ for action in ['train', 'merge']:
         continue
 
     # load base model & reduce embedding size
+    print('Loading base model')
     model = tokenizer = None  # free memory
-    model, tokenizer = load_unsloth_4bit(base_model)
+    model, tokenizer = load_unsloth_4bit(base_model, token=hf_token)
+    model.config.max_position_embeddings = 8192
     keep_tok = list('ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789!?.:,;*+/-=')+tokenizer.tokenize('\n')
     keep_single_char_tokens(model, tokenizer, keep=keep_tok, remove_unk=True)
 
     # set formatting options
+    print('Setting formatting options')
     fmt_opts = dict(
         preprompt='ABCDEFGHJKLMNPQRSTUVWXYZabcdefghjklmnpqrstuvwxyz',
         query_beg='I',
@@ -58,6 +61,7 @@ for action in ['train', 'merge']:
     )
 
     # create lora model
+    print('Creating LoRA model')
     lora_layers = ['q_proj', 'k_proj', 'v_proj', 'o_proj', 'gate_proj', 'up_proj', 'down_proj', 'embed_tokens', 'lm_head']
     model = FastLanguageModel.get_peft_model(
         model=model,
@@ -74,19 +78,16 @@ for action in ['train', 'merge']:
 
     if action == 'train':
         # load training data
-        arc_eval_set = ArcDataset.load_from_json(os.path.join(arc_data_path, 'arc-agi_evaluation_challenges.json'))
-        arc_eval_set = arc_eval_set.load_solutions(os.path.join(arc_data_path, 'arc-agi_evaluation_solutions.json'))
-        concept_arc = ArcDataset.load_from_neoneye(os.path.join(neoneye_path, 'dataset', 'ConceptARC'))
-        mix_datasets = {
-            'arceval': arc_eval_set.move_test_to_train().repeat(128),
-            'concept': concept_arc.move_test_to_train().repeat(128),
-        }
-        train_dataset = ArcDataset.load_from_rearc(re_arc_path, n=644, sizes=[6], seed=42, mix_datasets=mix_datasets)
+        print('Loading training data')
+        train_dataset = ArcDataset.load_from_json_dl(arc_data_path, size=6, seed=42)
 
         # augment data set and transform to list (eventually removing examples to stay below the max. token count)
         train_aug_opts = dict(tp=True, rt=True, perm=True, shfl_ex=True, seed=0)
         train_dataset_augment = train_dataset.augment(**train_aug_opts)
         train_dataset_as_list = train_dataset_augment.as_list(len_name='text', **fmt_opts)
+
+        dataset = Dataset.from_list(train_dataset_as_list)
+        print(dataset)
 
 
         # run training
@@ -122,11 +123,21 @@ for action in ['train', 'merge']:
                 seed=42,
                 output_dir='tmp_output',
                 save_strategy='no',
-                report_to='none',
+                report_to='wandb',
             ),
         )
+
+        wandb.init(
+            project="arc",
+            entity="dl-team14",
+            name=base_model + "-1st-sol",
+            config=trainer.args,
+        )
+
         trainer_stats = unsloth_train(trainer)
         save_model_and_tokenizer(f'{save_model_path}-lora', model, tokenizer)
+
+        wandb.finish()
 
     if action == 'merge':
         # load peft weights and merge

@@ -1,23 +1,13 @@
-import argparse
 import os
-from peft import LoraConfig, PeftModel, prepare_model_for_kbit_training
-from transformers import GenerationConfig
 import torch
 from typing import List
 import numpy as np
-import yaml
-import re
 
 from unsloth import FastLanguageModel
 from .arc_loader import ArcDataset
 from .model_tools import load_unsloth_4bit
 from .inference_tools import inference_run
 from .selection import EvalTool
-
-from datasets import Dataset
-from .model_tools import InputMaskingDataCollator
-from unsloth import UnslothTrainer as Trainer, unsloth_train, is_bfloat16_supported
-from unsloth import UnslothTrainingArguments as TrainingArguments
 
 class ARCSolver:
     """
@@ -62,29 +52,6 @@ class ARCSolver:
             else:
                 row.append(inv_map.get(idx, 0))
         return grid
-    
-    def _init_ttt_adapter(self):
-    
-        if hasattr(self, "_ttt_ready"):           # 이미 한 번 만들었으면 패스
-            return
-
-        self.model = FastLanguageModel.get_peft_model(
-            model=self.model,
-            target_modules=['q_proj','k_proj','v_proj','o_proj',
-                        'gate_proj','up_proj','down_proj'],
-            r=128,              # 필요하면 16·64 등 조정
-            lora_alpha=16,
-            lora_dropout=0,
-            bias="none",
-            random_state=42,
-            use_rslora=True
-        )
-        self._ttt_ready = True
-
-    def _zero_ttt_weights(self):
-        for p in self.model.parameters():
-            if getattr(p, "is_lora", False):
-                p.data.zero_()
 
     def setup(self, base_model):
         print("*** Setup model and tokenizer with config ***")
@@ -98,102 +65,6 @@ class ARCSolver:
             max_tokens=128000,
         )
 
-    def find_algorithm(self, train_inputs, train_outputs):
-        """
-        Find the algorithm that solves the given training data.
-
-        Args:
-            train_inputs (List[List[List[int]]]): Three 2D grids,
-                which is a inputs for a given question
-            train_outputs (List[List[List[int]]]): Three 2D grids,
-                which is the outputs of given input question.
-
-        Returns:
-            algorithm (function): A function that takes a 2D grid as input and returns a 2D grid as output.
-        """
-        import importlib, inspect
-        tasksolver = importlib.import_module('.dsl_solver', package='.arc')
-
-        train_inputs = [tuple(tuple(line) for line in train_inputs[i]) for i in range(len(train_inputs))]
-        train_outputs = [tuple(tuple(line) for line in train_outputs[i]) for i in range(len(train_outputs))]
-        all_functions = []
-        error_cnt = 0
-        for name, func in inspect.getmembers(tasksolver, inspect.isfunction):
-            if name.startswith('solve_'):
-                all_functions.append(func)
-
-        # apply each functions to train_input and check result
-        for func in all_functions:
-            try:
-                results = [func(train_input) for train_input in train_inputs]
-
-                # see if result is equal to train_output
-                if results == train_outputs:
-                    # print(f"====Found function {func.__name__}====\nresult:\n{results}\n train_outputs:\n{train_outputs}")
-                    return func
-            except Exception as e:
-                # skip if error
-                error_cnt += 1
-                pass
-
-        # if no function found, return None
-        # print(f"====No function found====\nfunctions_cnt: {len(all_functions)}, error_cnt: {error_cnt}, wrong_cnt: {len(all_functions) - error_cnt}")
-        return None
-    
-    def test_time_train(self, ttt_ds):
-        """
-        Test-time train the model with the given training data.
-
-        Args:
-            ttt_ds (ArcDataset): The training dataset to use for test-time training.
-        """
-
-        ttt_ds_aug = ttt_ds.remove_test_data().repeat(n=48, seed=42).augment(**self.ttt_aug_opts)
-        ttt_ds_as_list = ttt_ds_aug.as_list(len_name='text', **self.fmt_opts)
-
-        try:
-            # _flag_for_generation 속성이 없어도 계속 진행
-            FastLanguageModel.for_training(self.model)
-            trainer = Trainer(
-                model=self.model,
-                tokenizer=self.tokenizer,
-                train_dataset=Dataset.from_list(ttt_ds_as_list),
-                dataset_text_field="text",
-                max_seq_length=self.fmt_opts['max_tokens'],
-                data_collator=InputMaskingDataCollator(
-                    instruction_template=self.fmt_opts['query_beg'],
-                    response_template=self.fmt_opts['reply_beg'],
-                    mlm=False,
-                    tokenizer=self.tokenizer,
-                    mask_first_n_examples=0,
-                ),
-                args=TrainingArguments(
-                    per_device_train_batch_size=4,
-                    gradient_accumulation_steps=2,
-                    warmup_ratio=0.0,
-                    num_train_epochs=1,
-                    learning_rate=5e-5,
-                    embedding_learning_rate=1e-5,
-                    fp16=not is_bfloat16_supported(),
-                    bf16=is_bfloat16_supported(),
-                    logging_steps=1,
-                    optim="adamw_8bit",
-                    weight_decay=0.00,
-                    lr_scheduler_type='cosine',
-                    seed=42,
-                    output_dir='tmp_output',
-                    save_strategy='no',
-                    report_to='none',
-                ),
-            )
-
-            trainer_stats = unsloth_train(trainer)
-        except AttributeError as e:
-            if '_flag_for_generation' in str(e):
-                print("Note: Model was already in training mode or flag not found. Continuing...")
-            else:
-                raise  # 다른 AttributeError는 다시 발생시킴
-    
     def infer(self, base, ds, min_prob=0.9):
         """
         Run inference on the given dataset.
@@ -257,52 +128,35 @@ class ARCSolver:
             output (List[List[int]]): A 2d grid,
                 which is the output of given input question.
         """
-        # # Apply the algorithm if possible
-        # train_inputs = [examples[i]['input'] for i in range(len(examples))]
-        # train_outputs = [examples[i]['output'] for i in range(len(examples))]
-
-        # algorithm = self.find_algorithm(train_inputs, train_outputs)
-        # if algorithm is not None:
-        #     # If the algorithm is found, use it to generate the output
-        #     test_input = tuple(tuple(line) for line in questions_input)
-        #     try:
-        #         # TODO: 3개 다 체크해야 되는 것도 있고 1개만 통과해도 되는데 3개 검사하면 틀려서 넘어가는 것도 있음 -> 유연(트리플에스 김유연)하게 조절하기
-        #         output = algorithm(test_input)
-        #         return np.array(output)
-        #     except Exception as e:
-        #         pass
 
         base = 'mem'
         challenge = {
             base: {
-                'train': examples,                # List[dict]
+                'train': examples,
                 'test' : [{'input': questions_input}]
             }
         }
         keys = [f'{base}_0']
         
-        ttt_ds = ds = ArcDataset(challenge=challenge, keys=keys, is_orig=True)
+        ds = ArcDataset(challenge=challenge, keys=keys, is_orig=True)
         for i in range(1):
             print(f"{i+1}th infer")
-            self.infer_aug_opts["seed"] = self.our_lucky_seed[i];
-            best_score, best_output = self.infer(base, ds.augment(**self.infer_aug_opts), min_prob=(0.9 - (0.1) * i))
+            self.infer_aug_opts["seed"] = self.our_lucky_seed[i]
+            best_score, best_output = self.infer(base, ds.augment(**self.infer_aug_opts), min_prob=(0.92))
             if(best_score != float('-inf')):
-                return best_output;
+                return best_output
     
         
-        self.model.enable_adapter_layers() 
-        self.test_time_train(ttt_ds)
+        min_prob_list = [0.88, 0.72, 0.5, 0.25, 0.1]
         for i in range(5):
             print(f"{i+1}th infer")
-            self.infer_aug_opts["seed"] = self.our_lucky_seed[i];
-            best_score, best_output = self.infer(base, ds.augment(**self.infer_aug_opts), min_prob=(0.9 - (0.2) * i))
+            self.infer_aug_opts["seed"] = self.our_lucky_seed[i]
+            best_score, best_output = self.infer(base, ds.augment(**self.infer_aug_opts), min_prob=min_prob_list[i])
             if(best_score != float('-inf')):
-                return best_output;
-        self._zero_ttt_weights()
-        self.model.disable_adapter_layers()
+                return best_output
 
 
-        return best_output;
+        return best_output
 
 
     def prepare_evaluation(self):
@@ -315,11 +169,8 @@ class ARCSolver:
         # Setup model and tokenizer with config
         self.setup(save_model_path)
 
-        self._init_ttt_adapter()
-        self._zero_ttt_weights()
         self.infer_aug_opts = dict(tp='all', rt='all', perm=True, shfl_ex=True, seed=10000)
         self.eval_tool = EvalTool(n_guesses=1)
-        self.ttt_aug_opts = dict(tp=True, rt=True, perm=True, shfl_ex=True, seed=0)
         self.our_lucky_seed = [42, 627, 801, 820, 526]
 
 

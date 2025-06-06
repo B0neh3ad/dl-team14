@@ -66,8 +66,6 @@ class ArcDataset(object):
                 tasks = np.random.permutation(json.load(f)).tolist()
 
             n = len(tasks) // (1 + size) if not eval else 1
-            # if n > 1:
-            #     n = n // 2 # half the dataset for checking performance
             for epoch in range(n):
                 next_size_with_test = 1 + size
                 base_key = f'arc-{key}{epoch:02x}'

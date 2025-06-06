@@ -192,11 +192,9 @@ config
 unsloth_compiled_cache
 wandb/
 
-input
-
-1st-sol/training_code/finetuned_models/
+# etc
 1st-sol/submit/artifacts/
-
-Qwen2.5-3B-*/
+Qwen2.5-*/
+dataset-eval
 
 # End of https://www.toptal.com/developers/gitignore/api/python,dotenv

@@ -72,8 +72,8 @@ def main():
 
     set_seed(1234567890)
 
-    data_path = "/workspace/dataset"
-    N_data = 10
+    data_path = "/home/student/workspace/dataset-eval"
+    N_data = 80
 
     scores = []
     df = load_data(data_path)
@@ -85,7 +85,7 @@ def main():
     132, 138, 145, 148, 150, 164, 165, 182, 200, 212,
     223, 239, 243, 250, 252, 253, 258, 263, 276,
     """
-    eval_dataset = Dataset.from_pandas(df).shuffle(42).select([76,79,82,93,100,125,132,138,145,148,150,164,165,182,200,212,223,239,243,250,252,253,258,263,276])
+    eval_dataset = Dataset.from_pandas(df).shuffle(42).select(range(N_data))
     for idx, eval_data in enumerate(tqdm(eval_dataset)):
         preds = solver.predict(
             eval_data["train"],

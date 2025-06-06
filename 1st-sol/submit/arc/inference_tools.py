@@ -47,6 +47,9 @@ def calc_score(input, reply, model_tok, cache=None, **_):
 
 
 def explore(model, logits, path, eos, max_new_tokens, max_score, pos, cache, score=0.0):
+    if logits is None or logits.shape[0] == 0:
+        return []
+    
     first_token_logits, logits = logits[0], (logits[1:] if len(logits) > 1 else None)
     softmax = list(enumerate(-first_token_logits.detach().float().log_softmax(-1).cpu()))
 
@@ -198,9 +201,6 @@ def infer_task(keys, dataset, fmt_opts, aug_score_opts=None, pass_guess=True, pr
                     best_guess = res['output'], new_score
 
     return list(unique_results.values())
-
-def infer_task_dl(keys, dataset, fmt_opts, pass_guess=True, print_func=print, **kwargs):
-    pass
 
 def inference_run(dataset, fmt_opts, max_new_tokens=None, callback=None, **kwargs):
     # set token limits
