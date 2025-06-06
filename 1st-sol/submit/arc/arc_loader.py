@@ -14,12 +14,9 @@
 
 import os
 import re
-import itertools
 import json
-import hashlib
 import numpy as np
 from numpy.random import randint
-from glob import glob
 from tqdm import tqdm
 from collections import OrderedDict
 
@@ -39,16 +36,6 @@ class ArcDataset(object):
         self.solutions = {k: solutions[k] for k in base_keys if k in solutions}
         self.is_orig = is_fake
         self.is_orig = is_orig
-
-    @classmethod
-    def load_from_json(cls, challenges_file):  # for loading challenges in kaggle json arc dataset format
-        with open(challenges_file) as f:
-            challenge = f.read()
-        return cls(
-            challenge=json.loads(challenge),
-            is_fake=hashlib.md5(challenge.encode('utf-8')).hexdigest().lower() == 'a6b7dac3cab03abf2eb333e16610d6dc',
-            is_orig=True,
-        )
 
     @classmethod
     def load_from_json_dl(cls, path, size=6, seed=42, shuffle=True, eval=False):  # loader for arc
@@ -86,77 +73,6 @@ class ArcDataset(object):
         print("Number of tasks:", len(keys))
         return cls(keys=keys, challenge=challenge, solutions=solutions, is_orig=True)
 
-    def load_solutions(self, solutions_file):  # for loading solutions in kaggle json arc dataset format
-        with open(solutions_file) as f: solutions = f.read()
-        data = json.loads(solutions)
-        solutions = {k: data[k] for k in self.challenge}
-        return self.__class__(keys=self.keys, challenge=self.challenge, solutions=solutions, is_orig=self.is_orig)
-
-    # loader for Michael Hodel's ReArc https://github.com/neoneye/arc-dataset-collection
-    @classmethod
-    def load_from_rearc(cls, path, n, sizes, seed, mix_datasets={}, shuffle=True):  # loader for ReArc
-        np.random.seed(seed)
-        keys = [[] for _ in range(n)]
-        challenge = {}
-        solutions = {}
-        sizes = list(sizes)
-
-        with open(os.path.join(path, 'metadata.json')) as f:
-            metadata = json.load(f)
-
-        for key in tqdm(sorted(metadata.keys()), desc="load dataset 're-arc'"):
-            with open(os.path.join(path, 'tasks', f'{key}.json')) as f:
-                tasks = np.random.permutation(json.load(f)).tolist()
-
-            next_sizes = []
-            for epoch in range(n):
-                if not len(next_sizes):
-                    next_sizes = np.random.permutation(sizes).tolist()
-                next_size_with_test = 1 + next_sizes.pop()
-                base_key = f'rearc-{key}{epoch:02x}'
-                keys[epoch].append(f'{base_key}_0')
-                challenge[base_key] = {'train': [], 'test': []}
-                solutions[base_key] = reply = []
-                for _ in range(next_size_with_test):
-                    if not len(tasks):
-                        raise RuntimeError('Not enough examples - generate more re-arc examples or reduce epochs.')
-                    challenge[base_key]['train'].append({k: v for k, v in tasks.pop().items()})
-                challenge[base_key]['test'].append(challenge[base_key]['train'].pop())
-                solutions[base_key].append(challenge[base_key]['test'][-1].pop('output'))
-
-        for name, ds in mix_datasets.items():
-            name = cls.base_key_replace_invalid_chars(name)
-            for epoch, ds_keys in enumerate(np.array_split(ds.keys, len(keys))):
-                keys[epoch].extend([f'{name}-{k}' for k in ds_keys])
-            challenge.update({f'{name}-{k}': v for k, v in ds.challenge.items()})
-            solutions.update({f'{name}-{k}': v for k, v in ds.solutions.items()})
-
-        if shuffle:
-            keys = [np.random.permutation(epoch) for epoch in keys]
-        keys = [k for epoch in keys for k in epoch]
-        return cls(keys=keys, challenge=challenge, solutions=solutions, is_orig=True)
-
-    # loader for neoneye's format, as used in https://github.com/neoneye/arc-dataset-collection
-    @classmethod
-    def load_from_neoneye(cls, path):
-        pattern = os.path.join(path, 'data', '*', '*.json')
-        files = set(glob(pattern))
-        for i in itertools.count():
-            updated = [fn for fn in files if fn.endswith(f'_v{i + 1}.json')]
-            if not updated: break
-            for fn in updated:
-                files.remove(fn.replace(f'_v{i + 1}.json', ('.json' if i == 1 else f'_v{i}.json')))
-        assert len(files), f"No files found for pattern '{pattern}'."
-        challenge = {}
-        solutions = {}
-        assert len(files), 'no files found'
-        for fn in tqdm(files, desc=f"load dataset '{os.path.split(path)[-1]}'"):
-            with open(fn) as f:
-                key = cls.base_key_replace_invalid_chars(os.path.split(fn)[-1].replace('.json', ''))
-                challenge[key] = json.load(f)
-                solutions[key] = [test_case.pop('output') for test_case in challenge[key]['test']]
-        return cls(challenge=challenge, solutions=solutions, is_orig=True)
-
     def change_keys(self, keys):
         return self.__class__(challenge=self.challenge, solutions=self.solutions, keys=keys)
 
@@ -175,15 +91,6 @@ class ArcDataset(object):
             new_challenge = {k: self.challenge[k] for k in new_keys}
             split_datasets.append(self.__class__(challenge=new_challenge, solutions=self.solutions, is_orig=True))
         return split_datasets
-
-    def remove_test_data(self):
-        assert self.is_orig, 'Must be run on original dataset.'
-        new_challenge = {k: {'train': v['train'], 'test': []} for k, v in self.challenge.items()}
-        return self.__class__(challenge=new_challenge)
-
-    @staticmethod
-    def base_key_replace_invalid_chars(base_key):
-        return base_key.replace('_', '-').replace('.', '-')
 
     @staticmethod
     def get_base_key_and_reply_num(key):
@@ -395,29 +302,3 @@ class ArcDataset(object):
                     correct, info = False, ('bad_content' if correct_solution.shape == data.shape else 'bad_xy_size')
         return data, correct, info
 
-    def get_submission(self, results=None):
-        assert self.is_orig, 'Must be run on original dataset.'
-        submission = {k: [{f'attempt_{i+1}': [[0]] for i in range(2)} for _ in range(len(v['test']))] for k, v in self.challenge.items()}
-        if results is not None:
-            self.fill_submission(results, submission)
-        return submission
-
-    @staticmethod
-    def fill_submission(results, submission):
-        for base_key, data in results.items():
-            for reply_num, guesses in enumerate(data):
-                target_dict = submission[base_key][reply_num]
-                for i, g in enumerate(guesses[:len(target_dict)]):
-                    target_dict[f'attempt_{i + 1}'] = g['output'].tolist()
-
-    def validate_submission(self, submission):
-        assert self.is_orig, 'Must be run on original dataset.'
-        assert self.solutions, 'Solutions must be loaded for submission verification.'
-        score = 0
-        for k, v in self.solutions.items():
-            for i, r in enumerate(v):
-                for attempt in ['attempt_1', 'attempt_2']:
-                    if np.array_equal(r, submission[k][i][attempt]):
-                        score += 1 / len(v)
-                        break
-        return score

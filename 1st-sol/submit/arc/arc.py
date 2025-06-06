@@ -1,9 +1,10 @@
+from unsloth import FastLanguageModel
+
 import os
 import torch
 from typing import List
 import numpy as np
 
-from unsloth import FastLanguageModel
 from .arc_loader import ArcDataset
 from .model_tools import load_unsloth_4bit
 from .inference_tools import inference_run
@@ -142,16 +143,15 @@ class ARCSolver:
         for i in range(1):
             print(f"{i+1}th infer")
             self.infer_aug_opts["seed"] = self.our_lucky_seed[i]
-            best_score, best_output = self.infer(base, ds.augment(**self.infer_aug_opts), min_prob=(0.92))
+            best_score, best_output = self.infer(base, ds.augment(**self.infer_aug_opts), min_prob=(0.5))
             if(best_score != float('-inf')):
                 return best_output
     
         
-        min_prob_list = [0.88, 0.72, 0.5, 0.25, 0.1]
         for i in range(5):
             print(f"{i+1}th infer")
             self.infer_aug_opts["seed"] = self.our_lucky_seed[i]
-            best_score, best_output = self.infer(base, ds.augment(**self.infer_aug_opts), min_prob=min_prob_list[i])
+            best_score, best_output = self.infer(base, ds.augment(**self.infer_aug_opts), min_prob=0.5)
             if(best_score != float('-inf')):
                 return best_output
 
