@@ -23,9 +23,9 @@ from model_tools import InputMaskingDataCollator
 from model_tools import load_unsloth_4bit, keep_single_char_tokens, save_model_and_tokenizer
 from model_tools import load_peft_state, merge_peft_into_base
 
-import wandb
+# import wandb
 
-hf_token = "" # replace with your Hugging Face token if needed
+hf_token = "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" # replace with your Hugging Face token if needed
 
 # input paths
 base_model = 'Qwen/Qwen2.5-3B-Instruct'  # auto-downloaded from huggingface.co-
@@ -123,21 +123,21 @@ for action in ['train', 'merge']:
                 seed=42,
                 output_dir='tmp_output',
                 save_strategy='no',
-                report_to='wandb',
+                report_to="none",
             ),
         )
 
-        wandb.init(
-            project="arc",
-            entity="dl-team14",
-            name=base_model + "-1st-sol",
-            config=trainer.args,
-        )
+        # wandb.init(
+        #     project="arc",
+        #     entity="dl-team14",
+        #     name=base_model + "-1st-sol",
+        #     config=trainer.args,
+        # )
 
         trainer_stats = unsloth_train(trainer)
         save_model_and_tokenizer(f'{save_model_path}-lora', model, tokenizer)
 
-        wandb.finish()
+        # wandb.finish()
 
     if action == 'merge':
         # load peft weights and merge
